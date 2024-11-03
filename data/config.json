@@ -1,1 +1,1 @@
-[{"curso_id":"TMERT2","fecha_inicio":"1970-01-01","fecha_fin":"1970-01-01","estado":"CERRADO"},{"curso_id":"tmert3","fecha_inicio":"2024-10-30","fecha_fin":"2024-10-31","estado":"ACTIVO"}]
+{"curso_id":{"0":"TMERT3"},"fecha_inicio":{"0":"2024-11-03"},"fecha_fin":{"0":"2024-11-04"},"estado":{"0":"ACTIVO"}}
