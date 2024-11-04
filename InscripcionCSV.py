@@ -19,7 +19,6 @@ CURSO_CONFIG_PATH = "data/config.json"
 COMUNAS_REGIONES_PATH = "comunas-regiones.json"
 SECRET_PASSWORD = st.secrets["SECRET_PASSWORD"]
 
-
 # Cargar archivo JSON de comunas y regiones
 with open(COMUNAS_REGIONES_PATH, "r", encoding='utf-8') as file:
     comunas_regiones = json.load(file)
