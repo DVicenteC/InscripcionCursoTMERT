@@ -19,9 +19,8 @@ CURSO_CONFIG_PATH = "data/config.json"
 COMUNAS_REGIONES_PATH = "comunas-regiones.json"
 
 
-
 # Cargar archivo JSON de comunas y regiones
-with open(COMUNAS_REGIONES_PATH, "r") as file:
+with open(COMUNAS_REGIONES_PATH, "r", encoding='utf-8') as file:
     comunas_regiones = json.load(file)
 
 # Obtener lista de regiones
@@ -237,25 +236,25 @@ try:
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    rut = st.text_input("RUT (*)", help="Formato: 12345678-9")
-                    nombres = st.text_input("Nombres (*)")
-                    apellido_paterno = st.text_input("Apellido Paterno (*)")
+                    rut = st.text_input("RUT (*)", help="Formato: 12345678-9").upper()
+                    nombres = st.text_input("Nombres (*)").upper()
+                    apellido_paterno = st.text_input("Apellido Paterno (*)").upper()
                     
                 with col2:
-                    apellido_materno = st.text_input("Apellido Materno")
-                    nacionalidad = st.text_input("Nacionalidad (*)")
-                    rol = st.selectbox("Rol (*)", ROLES)
+                    apellido_materno = st.text_input("Apellido Materno (*)").upper()
+                    nacionalidad = st.text_input("Nacionalidad (*)").upper()
+                    rol = st.selectbox("Rol (*)", ROLES).upper()
                 
                 col3, col4 = st.columns(2)
                 
                 with col3:
                 
-                    rut_empresa = st.text_input("RUT Empresa (*)")
-                    razon_social = st.text_input("Razón Social (*)")
+                    rut_empresa = st.text_input("RUT Empresa (*)").upper()
+                    razon_social = st.text_input("Razón Social (*)").upper()
         
                 with col4:
                     
-                    direccion = st.text_input("Dirección (*)")
+                    direccion = st.text_input("Dirección (*)").upper()
                     # Seleccionar región y comuna fuera de un formulario
                     
                     
@@ -269,7 +268,7 @@ try:
                         st.error("RUT empresa inválido")
                     else:
                         # Crear el registro en una variable para validar duplicados
-                        registro_a_guardar = f"{rut}|{nombres}|{apellido_paterno}|{nacionalidad}|{rut_empresa}|{razon_social}|{region}|{comuna}|{direccion}"
+                        registro_a_guardar = f"{rut}|{rut_empresa}"
                         try:
                             # Cargar registros existentes
                             file = repo.get_contents(DATA_PATH)
@@ -279,20 +278,13 @@ try:
                             df_curso_actual = df_existente[df_existente['curso_id'] == curso_actual['curso_id']]
 
                             # Crear una columna combinada de los registros existentes para verificar duplicados
-                            df_curso_actual["registro_combinado"] = (
+                            df_curso_actual["ID_registro"] = (
                                 df_curso_actual["rut"].astype(str) + "|" +
-                                df_curso_actual["nombres"].astype(str) + "|" +
-                                df_curso_actual["apellido_paterno"].astype(str) + "|" +
-                                df_curso_actual["nacionalidad"].astype(str) + "|" +
-                                df_curso_actual["rut_empresa"].astype(str) + "|" +
-                                df_curso_actual["razon_social"].astype(str) + "|" +
-                                df_curso_actual["region"].astype(str) + "|" +
-                                df_curso_actual["comuna"].astype(str) + "|" +
-                                df_curso_actual["direccion"].astype(str)
+                                df_curso_actual["rut_empresa"].astype(str)
                             )
 
                             # Verificar si el registro ya existe en el curso actual
-                            if registro_a_guardar in df_curso_actual["registro_combinado"].values:
+                            if registro_a_guardar in df_curso_actual["ID_registro"].values:
                                 st.warning(f"Este registro ya existe para el curso {curso_actual['curso_id']}")
                             else:
                                 # Agregar el nuevo registro si no es duplicado
