@@ -17,6 +17,8 @@ REPO_NAME = "DVicenteC/InscripcionCursoTMERT"
 DATA_PATH = "data/registros.csv"
 CURSO_CONFIG_PATH = "data/config.json"
 COMUNAS_REGIONES_PATH = "comunas-regiones.json"
+SECRET_PASSWORD = st.secrets["secret_password"]
+
 
 
 # Cargar archivo JSON de comunas y regiones
@@ -41,7 +43,7 @@ try:
     st.sidebar.title("Panel de Control")
     password = st.sidebar.text_input("Contraseña", type="password")
 
-    if password == "admin123":
+    if password == SECRET_PASSWORD:
         st.sidebar.success("✅ Acceso concedido")
         
         # Leer configuración de cursos
