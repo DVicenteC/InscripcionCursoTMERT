@@ -17,7 +17,7 @@ REPO_NAME = "DVicenteC/InscripcionCursoTMERT"
 DATA_PATH = "data/registros.csv"
 CURSO_CONFIG_PATH = "data/config.json"
 COMUNAS_REGIONES_PATH = "comunas-regiones.json"
-SECRET_PASSWORD = st.secrets["secret_password"]
+SECRET_PASSWORD = st.secrets["SECRET_PASSWORD"]
 
 
 
