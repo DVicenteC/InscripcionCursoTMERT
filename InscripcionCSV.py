@@ -49,6 +49,7 @@ try:
         config_file = repo.get_contents(CURSO_CONFIG_PATH)
         config_data = json.loads(base64.b64decode(config_file.content))
         df_cursos = pd.DataFrame(config_data)
+        df_cursos['cupo_maximo'] = pd.to_numeric(df_cursos['cupo_maximo'])
         
         # Selector de curso para activar
         cursos_disponibles = df_cursos['curso_id'].tolist()
@@ -81,6 +82,7 @@ try:
         fecha_fin = st.sidebar.date_input("Fecha de Término")
         curso_id = curso_id + "-" + fecha_inicio.strftime("%Y%m%d") + "-" + fecha_fin.strftime("%Y%m%d")
         
+        cupo_maximo = st.sidebar.number_input("Cupo Máximo", min_value=1, value=50) 
         if st.sidebar.button("Crear Curso"):
             if curso_id and fecha_fin > fecha_inicio:
                 try:
@@ -97,12 +99,13 @@ try:
                         'curso_id': str(curso_id),
                         'fecha_inicio': fecha_inicio.strftime('%Y-%m-%d'),
                         'fecha_fin': fecha_fin.strftime('%Y-%m-%d'),
+                        'cupo_maximo': int(cupo_maximo),  # Agregamos el cupo máximo
                         'estado': 'ACTIVO'
                     }])
-                    
+
                     # Combinar configuración
                     df_config = pd.concat([df_config, nuevo_curso], ignore_index=True)
-                    
+
                     # Guardar configuración
                     config_json = df_config.to_json(orient='records')
                     try:
@@ -216,8 +219,27 @@ try:
     try:
         config_file = repo.get_contents(CURSO_CONFIG_PATH)
         config_data = json.loads(base64.b64decode(config_file.content))
+
+        # Agregar estas líneas de depuración
+        #st.write("Config data:", config_data)
+
         df_cursos = pd.DataFrame(config_data)
-        
+
+        # Si no existe la columna cupo_maximo, agregarla con valor por defecto
+        if 'cupo_maximo' not in df_cursos.columns:
+            df_cursos['cupo_maximo'] = 50  # valor por defecto
+
+            # Actualizar el archivo config.json con la nueva columna
+            config_json = df_cursos.to_json(orient='records')
+            repo.update_file(
+                CURSO_CONFIG_PATH,
+                "Agregando columna cupo_maximo",
+                config_json,
+                config_file.sha
+            )
+
+        df_cursos['cupo_maximo'] = pd.to_numeric(df_cursos['cupo_maximo'])
+
         # Buscar curso activo
         curso_activo = df_cursos[df_cursos['estado'] == 'ACTIVO']
         
@@ -227,6 +249,32 @@ try:
             st.title("Inscripción Curso de 40 horas Protocolo TMERT para Implementadores - Empresas Adherentes de IST")
             st.write(f"Curso: {curso_actual['curso_id']}")
             st.write(f"Período: {curso_actual['fecha_inicio']} - {curso_actual['fecha_fin']}")
+            
+            # Agregar esto:
+            try:
+                registros_file = repo.get_contents(DATA_PATH)
+                df_registros = pd.read_csv(io.StringIO(base64.b64decode(registros_file.content).decode()))
+                inscritos_actuales = len(df_registros[df_registros['curso_id'] == curso_actual['curso_id']])
+                cupos_disponibles = curso_actual['cupo_maximo'] - inscritos_actuales
+
+                # Mostrar información de cupos
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Cupo Máximo", curso_actual['cupo_maximo'])
+                with col2:
+                    st.metric("Inscritos", inscritos_actuales)
+                with col3:
+                    st.metric("Cupos Disponibles", cupos_disponibles)
+
+                if cupos_disponibles <= 0:
+                    st.error("Lo sentimos, este curso ha alcanzado el límite máximo de inscripciones.")
+                    st.stop()
+            except:
+                # Si no hay archivo de registros, inicializar contadores
+                inscritos_actuales = 0
+                cupos_disponibles = curso_actual['cupo_maximo']
+            
+            
             
             # [Aquí va el resto del código del formulario, que se mantiene igual]
             region = st.selectbox("Región (*)", regiones, key='region', on_change=update_comunas_state)
@@ -258,16 +306,23 @@ try:
                     direccion = st.text_input("Dirección (*)").upper()
                     # Seleccionar región y comuna fuera de un formulario
                     
-                    
                 if st.form_submit_button("Enviar"):
-                    if not all([rut, nombres, apellido_paterno, nacionalidad, 
-                              rut_empresa, razon_social, region, comuna, direccion]):
+                    # Primero verificar cupos disponibles (nueva verificación)
+                    registros_file = repo.get_contents(DATA_PATH)
+                    df_registros = pd.read_csv(io.StringIO(base64.b64decode(registros_file.content).decode()))
+                    inscritos_actuales = len(df_registros[df_registros['curso_id'] == curso_actual['curso_id']])
+                    cupos_disponibles = curso_actual['cupo_maximo'] - inscritos_actuales
+
+                    if cupos_disponibles <= 0:
+                        st.error("Lo sentimos, mientras se procesaba su solicitud se agotaron los cupos disponibles.")
+                    elif not all([rut, nombres, apellido_paterno, nacionalidad, 
+                                 rut_empresa, razon_social, region, comuna, direccion]):
                         st.error("Complete todos los campos obligatorios")
                     elif not rut_chile.is_valid_rut(rut):
                         st.error("RUT personal inválido")
                     elif not rut_chile.is_valid_rut(rut_empresa):
                         st.error("RUT empresa inválido")
-                    else:
+                    else:    
                         # Crear el registro en una variable para validar duplicados
                         registro_a_guardar = f"{rut}|{rut_empresa}"
                         try:
@@ -312,15 +367,31 @@ try:
                                 st.success("✅ Registro guardado exitosamente")
                                 st.balloons()
                                 time.sleep(2)
+                                st.rerun()
                         except Exception as e:
                             st.error(f"Error al guardar registro: {str(e)}")
+                            
             if st.button("Ver inscritos"):
                 registros_file = repo.get_contents(DATA_PATH)
                 df_registros = pd.read_csv(io.StringIO(base64.b64decode(registros_file.content).decode()))
                 registros_curso = df_registros[df_registros['curso_id'] == curso_actual['curso_id']]
-                
+
                 if not registros_curso.empty:
+                    # Mostrar métricas de cupos en la parte superior
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Cupo Máximo", curso_actual['cupo_maximo'])
+                    with col2:
+                        st.metric("Inscritos", len(registros_curso))
+                    with col3:
+                        st.metric("Cupos Disponibles", curso_actual['cupo_maximo'] - len(registros_curso))
+
+                    # Mostrar la tabla de inscritos
+                    st.write("### Lista de Inscritos")
                     st.write(registros_curso)
+                else:
+                    st.info("Aún no hay inscritos en este curso")
+            
                     
         else:
             st.warning("No hay ningún curso activo. El administrador debe crear uno.")
