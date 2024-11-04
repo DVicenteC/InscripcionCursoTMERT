@@ -315,10 +315,10 @@ try:
                                 time.sleep(2)
                         except Exception as e:
                             st.error(f"Error al guardar registro: {str(e)}")
-                if st.button("Ver inscritos"):
-                    registros_file = repo.get_contents(DATA_PATH)
-                    df_registros = pd.read_csv(io.StringIO(base64.b64decode(registros_file.content).decode()))
-                    registros_curso = df_registros[df_registros['curso_id'] == curso_actual['curso_id']]
+            if st.button("Ver inscritos"):
+                registros_file = repo.get_contents(DATA_PATH)
+                df_registros = pd.read_csv(io.StringIO(base64.b64decode(registros_file.content).decode()))
+                registros_curso = df_registros[df_registros['curso_id'] == curso_actual['curso_id']]
         else:
             st.warning("No hay ningún curso activo. El administrador debe crear uno.")
     except Exception as e:
