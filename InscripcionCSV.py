@@ -20,7 +20,6 @@ COMUNAS_REGIONES_PATH = "comunas-regiones.json"
 SECRET_PASSWORD = st.secrets["SECRET_PASSWORD"]
 
 
-
 # Cargar archivo JSON de comunas y regiones
 with open(COMUNAS_REGIONES_PATH, "r", encoding='utf-8') as file:
     comunas_regiones = json.load(file)
@@ -319,6 +318,10 @@ try:
                 registros_file = repo.get_contents(DATA_PATH)
                 df_registros = pd.read_csv(io.StringIO(base64.b64decode(registros_file.content).decode()))
                 registros_curso = df_registros[df_registros['curso_id'] == curso_actual['curso_id']]
+                
+                if not registros_curso.empty:
+                    st.write(registros_curso)
+                    
         else:
             st.warning("No hay ningún curso activo. El administrador debe crear uno.")
     except Exception as e:
