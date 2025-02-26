@@ -7,14 +7,110 @@ import io
 from rut_chile import rut_chile
 import json
 import time
+from cryptography.fernet import Fernet
 
+import streamlit as st
+from github import Github
+import base64
+from datetime import datetime
+import pandas as pd
+import io
+from rut_chile import rut_chile
+import json
+import time
+from cryptography.fernet import Fernet
+
+# Clase para manejar la anonimización
+class DataAnonymizer:
+    def __init__(self):
+        self.key = st.secrets["ENCRYPTION_KEY"].encode()
+        self.cipher_suite = Fernet(self.key)
+        
+    def encrypt_value(self, value):
+        """Encripta un valor individual"""
+        if pd.isna(value):
+            return value
+        return self.cipher_suite.encrypt(str(value).encode()).decode()
+    
+    def decrypt_value(self, value):
+        """Desencripta un valor individual"""
+        if pd.isna(value):
+            return value
+        return self.cipher_suite.decrypt(str(value).encode()).decode()
+
+    def anonymize_data(self, data):
+        """Encripta campos sensibles del DataFrame"""
+        if isinstance(data, dict):
+            data = pd.DataFrame([data])
+            
+        # Campos a anonimizar
+        sensitive_fields = ['rut', 'nombres', 'apellido_paterno', 'apellido_materno', 
+                          'rut_empresa', 'razon_social']
+        
+        df_anon = data.copy()
+        
+        for field in sensitive_fields:
+            if field in df_anon.columns:
+                df_anon[field] = df_anon[field].apply(self.encrypt_value)
+                
+        return df_anon
+    
+    def deanonymize_data(self, data):
+        """Desencripta campos sensibles del DataFrame"""
+        if data.empty:
+            return data
+            
+        df_deanon = data.copy()
+        
+        sensitive_fields = ['rut', 'nombres', 'apellido_paterno', 'apellido_materno', 
+                          'rut_empresa', 'razon_social']
+        
+        for field in sensitive_fields:
+            if field in df_deanon.columns:
+                df_deanon[field] = df_deanon[field].apply(self.decrypt_value)
+                
+        return df_deanon
+
+# Funciones para manejar archivos parquet en GitHub
+def save_to_parquet(df, repo, path):
+    """Guarda DataFrame en formato parquet en GitHub"""
+    parquet_buffer = io.BytesIO()
+    df.to_parquet(parquet_buffer)
+    parquet_content = base64.b64encode(parquet_buffer.getvalue()).decode()
+    
+    try:
+        file = repo.get_contents(path)
+        repo.update_file(
+            path,
+            f"Actualización registros {datetime.now()}",
+            parquet_content,
+            file.sha
+        )
+    except:
+        repo.create_file(
+            path,
+            f"Creación registros {datetime.now()}",
+            parquet_content
+        )
+
+def load_from_parquet(repo, path):
+    """Carga DataFrame desde archivo parquet en GitHub"""
+    try:
+        file = repo.get_contents(path)
+        parquet_content = base64.b64decode(file.content)
+        return pd.read_parquet(io.BytesIO(parquet_content))
+    except:
+        return pd.DataFrame()
+
+# Inicializar el anonymizer como variable global
+anonymizer = DataAnonymizer()
 # Configuración básica
 st.set_page_config(page_title="Registro de Participantes", layout="wide")
 
 # Constantes
 GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
 REPO_NAME = "DVicenteC/InscripcionCursoTMERT"
-DATA_PATH = "data/registros.csv"
+DATA_PATH = "data/registros.parquet"
 CURSO_CONFIG_PATH = "data/config.json"
 COMUNAS_REGIONES_PATH = "comunas-regiones.json"
 SECRET_PASSWORD = st.secrets["SECRET_PASSWORD"]
@@ -152,50 +248,61 @@ try:
             )
             
             if curso_seleccionado and st.sidebar.button("Descargar Registros"):
-                # Filtrar registros del curso seleccionado
-                registros_curso = df_registros[df_registros['curso_id'] == curso_seleccionado]
-                
-                if not registros_curso.empty:
-                    # Preparar Excel para descarga
-                    buffer = io.BytesIO()
-                    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                        registros_curso.to_excel(
-                            writer,
-                            sheet_name='Datos',
-                            index=False,
-                            float_format='%.2f',
-                            columns=[
-                                'fecha_registro', 'curso_id', 'rut', 'nombres',
-                                'apellido_paterno', 'apellido_materno', 'nacionalidad',
-                                'rol', 'rut_empresa', 'razon_social', 'region',
-                                'comuna', 'direccion'
-                            ]
-                        )
-                        
-                        # Formato para el archivo Excel
-                        workbook = writer.book
-                        worksheet = writer.sheets['Datos']
-                        header_format = workbook.add_format({
-                            'bold': True,
-                            'bg_color': '#D8E4BC',
-                            'border': 1
-                        })
-                        
-                        for col_num, value in enumerate(registros_curso.columns.values):
-                            worksheet.write(0, col_num, value, header_format)
-                            worksheet.set_column(col_num, col_num, len(str(value)) + 2)
-                        
-                        worksheet.freeze_panes(1, 0)
+                try:
+                    # Cargar datos desde parquet
+                    df_registros = load_from_parquet(repo, DATA_PATH)
                     
-                    buffer.seek(0)
-                    st.sidebar.download_button(
-                        label=f"📥 Descargar Registros ({len(registros_curso)} inscritos)",
-                        data=buffer.getvalue(),
-                        file_name=f"registros_curso_{curso_seleccionado}.xlsx",
-                        mime="application/vnd.ms-excel"
-                    )
-                else:
-                    st.sidebar.warning("No hay registros para este curso")
+                    # Desencriptar datos para la descarga
+                    df_registros_desc = anonymizer.deanonymize_data(df_registros)
+                    
+                    # Filtrar registros del curso seleccionado
+                    registros_curso = df_registros_desc[df_registros_desc['curso_id'] == curso_seleccionado]
+                    
+                    if not registros_curso.empty:
+                        # Preparar Excel para descarga
+                        buffer = io.BytesIO()
+                        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                            registros_curso.to_excel(
+                                writer,
+                                sheet_name='Datos',
+                                index=False,
+                                float_format='%.2f',
+                                columns=[
+                                    'fecha_registro', 'curso_id', 'rut', 'nombres',
+                                    'apellido_paterno', 'apellido_materno', 'nacionalidad',
+                                    'rol', 'rut_empresa', 'razon_social', 'region',
+                                    'comuna', 'direccion'
+                                ]
+                            )
+                            
+                            # Formato para el archivo Excel
+                            workbook = writer.book
+                            worksheet = writer.sheets['Datos']
+                            header_format = workbook.add_format({
+                                'bold': True,
+                                'bg_color': '#D8E4BC',
+                                'border': 1
+                            })
+                            
+                            # Aplicar formato a las columnas
+                            for col_num, value in enumerate(registros_curso.columns.values):
+                                worksheet.write(0, col_num, value, header_format)
+                                worksheet.set_column(col_num, col_num, len(str(value)) + 2)
+                            
+                            worksheet.freeze_panes(1, 0)
+                        
+                        buffer.seek(0)
+                        st.sidebar.download_button(
+                            label=f"📥 Descargar Registros ({len(registros_curso)} inscritos)",
+                            data=buffer.getvalue(),
+                            file_name=f"registros_curso_{curso_seleccionado}.xlsx",
+                            mime="application/vnd.ms-excel"
+                        )
+                    else:
+                        st.sidebar.warning("No hay registros para este curso")
+                        
+                except Exception as e:
+                    st.sidebar.error(f"Error al preparar la descarga: {str(e)}")
             
             # Reinicio de base de datos (no funcionó)
                         
@@ -306,92 +413,116 @@ try:
                     # Seleccionar región y comuna fuera de un formulario
                     
                 if st.form_submit_button("Enviar"):
-                    # Primero verificar cupos disponibles (nueva verificación)
-                    registros_file = repo.get_contents(DATA_PATH)
-                    df_registros = pd.read_csv(io.StringIO(base64.b64decode(registros_file.content).decode()))
-                    inscritos_actuales = len(df_registros[df_registros['curso_id'] == curso_actual['curso_id']])
-                    cupos_disponibles = curso_actual['cupo_maximo'] - inscritos_actuales
+                    try:
+                        # Cargar registros existentes (si hay)
+                        df_registros = load_from_parquet(repo, DATA_PATH)
+                        
+                        # Crear el nuevo registro primero
+                        nuevo_registro = {
+                            'fecha_registro': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                            'curso_id': curso_actual['curso_id'],
+                            'rut': rut,
+                            'nombres': nombres,
+                            'apellido_paterno': apellido_paterno,
+                            'apellido_materno': apellido_materno,
+                            'nacionalidad': nacionalidad,
+                            'rol': rol,
+                            'rut_empresa': rut_empresa,
+                            'razon_social': razon_social,
+                            'region': region,
+                            'comuna': comuna,
+                            'direccion': direccion
+                        }
 
-                    if cupos_disponibles <= 0:
-                        st.error("Lo sentimos, mientras se procesaba su solicitud se agotaron los cupos disponibles.")
-                    elif not all([rut, nombres, apellido_paterno, nacionalidad, 
-                                 rut_empresa, razon_social, region, comuna, direccion]):
-                        st.error("Complete todos los campos obligatorios")
-                    elif not rut_chile.is_valid_rut(rut):
-                        st.error("RUT personal inválido")
-                    elif not rut_chile.is_valid_rut(rut_empresa):
-                        st.error("RUT empresa inválido")
-                    else:    
-                        # Crear el registro en una variable para validar duplicados
-                        registro_a_guardar = f"{rut}|{rut_empresa}"
-                        try:
-                            # Cargar registros existentes
-                            file = repo.get_contents(DATA_PATH)
-                            df_existente = pd.read_csv(io.StringIO(base64.b64decode(file.content).decode()))
+                        # Validaciones básicas
+                        if not all([rut, nombres, apellido_paterno, nacionalidad, 
+                                    rut_empresa, razon_social, region, comuna, direccion]):
+                            st.error("Complete todos los campos obligatorios")
+                            st.stop()
+                        
+                        if not rut_chile.is_valid_rut(rut):
+                            st.error("RUT personal inválido")
+                            st.stop()
                             
-                            # Filtrar solo los registros del curso activo
-                            df_curso_actual = df_existente[df_existente['curso_id'] == curso_actual['curso_id']]
+                        if not rut_chile.is_valid_rut(rut_empresa):
+                            st.error("RUT empresa inválido")
+                            st.stop()
 
-                            # Crear una columna combinada de los registros existentes para verificar duplicados
-                            df_curso_actual["ID_registro"] = (
-                                df_curso_actual["rut"].astype(str) + "|" +
-                                df_curso_actual["rut_empresa"].astype(str)
-                            )
+                        # Verificar cupos solo si hay registros existentes
+                        if not df_registros.empty:
+                            df_registros_desc = anonymizer.deanonymize_data(df_registros)
+                            inscritos_actuales = len(df_registros_desc[df_registros_desc['curso_id'] == curso_actual['curso_id']])
+                            cupos_disponibles = curso_actual['cupo_maximo'] - inscritos_actuales
 
-                            # Verificar si el registro ya existe en el curso actual
-                            if registro_a_guardar in df_curso_actual["ID_registro"].values:
-                                st.warning(f"Este registro ya existe para el curso {curso_actual['curso_id']}")
-                            else:
-                                # Agregar el nuevo registro si no es duplicado
-                                nuevo_registro = pd.DataFrame([{
-                                    'fecha_registro': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                                    'curso_id': curso_actual['curso_id'],
-                                    'rut': rut,
-                                    'nombres': nombres,
-                                    'apellido_paterno': apellido_paterno,
-                                    'apellido_materno': apellido_materno,
-                                    'nacionalidad': nacionalidad,
-                                    'rol': rol,
-                                    'rut_empresa': rut_empresa,
-                                    'razon_social': razon_social,
-                                    'region': region,
-                                    'comuna': comuna,
-                                    'direccion': direccion
-                                }])
+                            if cupos_disponibles <= 0:
+                                st.error("Lo sentimos, mientras se procesaba su solicitud se agotaron los cupos disponibles.")
+                                st.stop()
+
+                            # Verificar duplicados solo si hay registros existentes
+                            registro_a_validar = f"{rut}|{rut_empresa}"
+                            df_curso_actual = df_registros_desc[df_registros_desc['curso_id'] == curso_actual['curso_id']]
+                            
+                            if not df_curso_actual.empty:
+                                df_curso_actual["ID_registro"] = (
+                                    df_curso_actual["rut"].astype(str) + "|" +
+                                    df_curso_actual["rut_empresa"].astype(str)
+                                )
                                 
-                                # Combinar con los registros existentes y guardar en GitHub
-                                df_actualizado = pd.concat([df_existente, nuevo_registro], ignore_index=True)
-                                csv_content = df_actualizado.to_csv(index=False)
-                                repo.update_file(DATA_PATH, f"Nuevo registro {datetime.now()}", csv_content, file.sha)
-                                st.success("✅ Registro guardado exitosamente")
-                                st.balloons()
-                                time.sleep(2)
-                                st.rerun()
-                        except Exception as e:
-                            st.error(f"Error al guardar registro: {str(e)}")
+                                if registro_a_validar in df_curso_actual["ID_registro"].values:
+                                    st.warning(f"Este registro ya existe para el curso {curso_actual['curso_id']}")
+                                    st.stop()
+
+                        # Anonimizar el nuevo registro
+                        df_nuevo = anonymizer.anonymize_data(nuevo_registro)
+                        
+                        # Combinar con registros existentes o crear nuevo DataFrame
+                        if df_registros.empty:
+                            df_actualizado = df_nuevo
+                        else:
+                            df_actualizado = pd.concat([df_registros, df_nuevo], ignore_index=True)
+                        
+                        # Guardar en formato parquet
+                        save_to_parquet(df_actualizado, repo, DATA_PATH)
+                        
+                        st.success("✅ Registro guardado exitosamente")
+                        st.balloons()
+                        time.sleep(2)
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"Error al guardar registro: {str(e)}")
+                        # Para debugging
+                        st.write("Detalles del error:", e)
                             
             if st.button("Ver inscritos"):
-                registros_file = repo.get_contents(DATA_PATH)
-                df_registros = pd.read_csv(io.StringIO(base64.b64decode(registros_file.content).decode()))
-                registros_curso = df_registros[df_registros['curso_id'] == curso_actual['curso_id']]
-
-                if not registros_curso.empty:
-                    # Mostrar métricas de cupos en la parte superior
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Cupo Máximo", curso_actual['cupo_maximo'])
-                    with col2:
-                        st.metric("Inscritos", len(registros_curso))
-                    with col3:
-                        st.metric("Cupos Disponibles", curso_actual['cupo_maximo'] - len(registros_curso))
-
-                    # Mostrar la tabla de inscritos
-                    st.write("### Lista de Inscritos")
-                    st.write(registros_curso)
-                else:
-                    st.info("Aún no hay inscritos en este curso")
-            
+                try:
+                    # Cargar datos desde parquet
+                    df_registros = load_from_parquet(repo, DATA_PATH)
                     
+                    # Desencriptar datos para mostrarlos
+                    df_registros_desc = anonymizer.deanonymize_data(df_registros)
+                    
+                    # Filtrar por curso actual
+                    registros_curso = df_registros_desc[df_registros_desc['curso_id'] == curso_actual['curso_id']]
+
+                    if not registros_curso.empty:
+                        # Mostrar métricas de cupos en la parte superior
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Cupo Máximo", curso_actual['cupo_maximo'])
+                        with col2:
+                            st.metric("Inscritos", len(registros_curso))
+                        with col3:
+                            st.metric("Cupos Disponibles", curso_actual['cupo_maximo'] - len(registros_curso))
+
+                        # Mostrar la tabla de inscritos
+                        st.write("### Lista de Inscritos")
+                        st.write(registros_curso)
+                    else:
+                        st.info("Aún no hay inscritos en este curso")
+                except Exception as e:
+                    st.error(f"Error al cargar registros: {str(e)}")
+            
         else:
             st.warning("No hay ningún curso activo. El administrador debe crear uno.")
     except Exception as e:
