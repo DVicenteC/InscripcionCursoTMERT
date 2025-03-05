@@ -302,6 +302,7 @@ try:
                     nombres = st.text_input("Nombres (*)").upper()
                     apellido_paterno = st.text_input("Apellido Paterno (*)").upper()
                     email = st.text_input("Correo Electrónico (*)", help="ejemplo@dominio.com")
+                    gmail = st.text_input("Correo Gmail (*)", help="ejemplo@gmail.com")
                     
                 with col2:
                     apellido_materno = st.text_input("Apellido Materno (*)").upper()
@@ -328,7 +329,7 @@ try:
 
                     if cupos_disponibles <= 0:
                         st.error("Lo sentimos, mientras se procesaba su solicitud se agotaron los cupos disponibles.")
-                    elif not all([rut, nombres, apellido_paterno, nacionalidad, email,
+                    elif not all([rut, nombres, apellido_paterno, nacionalidad, email, gmail,
                                  rut_empresa, razon_social, region, comuna, direccion]):
                         st.error("Complete todos los campos obligatorios")
                     elif not rut_chile.is_valid_rut(rut):
@@ -337,6 +338,8 @@ try:
                         st.error("RUT empresa inválido")
                     elif '@' not in email or '.' not in email:
                         st.error("Correo electrónico inválido")
+                    elif '@gmail.com' not in gmail.lower():
+                        st.error("Debe ingresar un correo Gmail válido")
                     else:    
                         # Preparar nuevo registro
                         nuevo_registro = {
@@ -348,6 +351,7 @@ try:
                             'apellido_materno': apellido_materno,
                             'nacionalidad': nacionalidad,
                             'email': email,
+                            'gmail': gmail,
                             'rol': rol,
                             'rut_empresa': rut_empresa,
                             'razon_social': razon_social,
