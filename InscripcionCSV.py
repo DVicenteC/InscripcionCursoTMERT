@@ -362,6 +362,7 @@ try:
                         
                         # Guardar registro
                         if guardar_registro(nuevo_registro):
+                            st.write("Enviando registro:", nuevo_registro)
                             st.success("✅ Registro guardado exitosamente")
                             st.balloons()
                             time.sleep(2)
