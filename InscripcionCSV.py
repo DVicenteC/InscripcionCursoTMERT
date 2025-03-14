@@ -338,8 +338,8 @@ try:
                         st.error("RUT empresa inválido")
                     elif '@' not in email or '.' not in email:
                         st.error("Correo electrónico inválido")
-                    elif '@gmail.com' not in gmail.lower():
-                        st.error("Debe ingresar un correo Gmail válido")
+                    #elif '@gmail.com' not in gmail.lower():
+                    #    st.error("Debe ingresar un correo Gmail válido")
                     else:    
                         # Preparar nuevo registro
                         nuevo_registro = {
