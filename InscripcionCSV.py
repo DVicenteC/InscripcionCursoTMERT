@@ -264,7 +264,7 @@ try:
         curso_actual = get_curso_activo()
         
         if curso_actual:
-            st.title("Inscripción Curso de 40 horas Protocolo TMERT para Implementadores - Empresas Adherentes de IST")
+            st.title("Inscripción Curso de 20 horas Protocolo VOTME para Profesionales SST Implementadores - Empresas Adherentes de IST")
             st.write(f"Curso: {curso_actual['curso_id']}")
             st.write(f"Período: {curso_actual['fecha_inicio']} - {curso_actual['fecha_fin']}")
             
