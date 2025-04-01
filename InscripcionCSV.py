@@ -20,6 +20,7 @@ API_KEY = st.secrets["API_KEY"]  # Clave API configurada en el Apps Script
 ROLES = ["TRABAJADOR", "PROFESIONAL SST", "MIEMBRO DE COMITÉ PARITARIO", 
          "MONITOR O DELEGADO", "DIRIGENTE SINDICAL", "EMPLEADOR", 
          "TRABAJADOR DEL OA", "OTROS"]
+SEXO =['MUJER','HOMBRE']
 
 # Cargar archivo JSON de comunas y regiones
 with open(COMUNAS_REGIONES_PATH, "r", encoding='utf-8') as file:
@@ -305,6 +306,7 @@ try:
                     gmail = st.text_input("Correo Gmail (*)", help="ejemplo@gmail.com")
                     
                 with col2:
+                    sexo = st.selectbox("Sexo (*)", SEXO).upper()
                     apellido_materno = st.text_input("Apellido Materno (*)").upper()
                     nacionalidad = st.text_input("Nacionalidad (*)").upper()
                     rol = st.selectbox("Rol (*)", ROLES).upper()
@@ -352,6 +354,7 @@ try:
                             'nacionalidad': nacionalidad,
                             'email': email,
                             'gmail': gmail,
+                            'sexo': sexo,
                             'rol': rol,
                             'rut_empresa': rut_empresa,
                             'razon_social': razon_social,
