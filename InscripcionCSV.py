@@ -37,8 +37,8 @@ def get_config_data():
         
         if data['success']:
             df = pd.DataFrame(data['cursos'])
-            if not df.empty:
-                df['cupo_maximo'] = pd.to_numeric(df['cupo_maximo'])
+            if not df.empty and 'cupo_maximo' in df.columns:
+                df['cupo_maximo'] = pd.to_numeric(df['cupo_maximo'], errors='coerce')
             return df
         else:
             st.error(f"Error al obtener configuración: {data.get('error', 'Error desconocido')}")
@@ -152,49 +152,94 @@ try:
 
     if password == SECRET_PASSWORD:
         st.sidebar.success("✅ Acceso concedido")
-        
+
         # Obtener configuración de cursos
         df_cursos = get_config_data()
-        
+
+        # Filtro regional para admin
+        st.sidebar.subheader("Filtrar por Región")
+        opciones_region_admin = ["Todas las regiones"] + regiones
+        region_admin = st.sidebar.selectbox(
+            "Seleccione región para gestionar",
+            opciones_region_admin,
+            key="region_admin"
+        )
+
+        # Filtrar cursos según región seleccionada
+        if not df_cursos.empty and region_admin != "Todas las regiones":
+            if 'region' in df_cursos.columns:
+                df_cursos_filtrados = df_cursos[df_cursos['region'] == region_admin]
+            else:
+                df_cursos_filtrados = df_cursos
+        else:
+            df_cursos_filtrados = df_cursos
+
+        st.sidebar.divider()
+
         # Selector de curso para activar
-        if not df_cursos.empty:
-            cursos_disponibles = df_cursos['curso_id'].tolist()
-            
+        if not df_cursos_filtrados.empty:
+            cursos_disponibles = df_cursos_filtrados['curso_id'].tolist()
+
             if cursos_disponibles:
                 curso_seleccionado = st.sidebar.selectbox(
                     "Seleccionar Curso para Activar",
                     cursos_disponibles,
                     index=0
                 )
-                
+
                 if st.sidebar.button("Activar Curso"):
                     if activar_curso(curso_seleccionado):
                         st.sidebar.success(f"✅ Curso {curso_seleccionado} activado")
                         time.sleep(1)
                         st.rerun()
-        
+
+        st.sidebar.divider()
+
         # Crear nuevo curso
         st.sidebar.subheader("Crear Nuevo Curso")
+
+        # Selector de región para el nuevo curso
+        region_curso = st.sidebar.selectbox(
+            "Región del Curso (*)",
+            regiones,
+            key="region_nuevo_curso"
+        )
+
         curso_id = st.sidebar.text_input("ID del Curso")
         fecha_inicio = st.sidebar.date_input("Fecha de Inicio")
         fecha_fin = st.sidebar.date_input("Fecha de Término")
-        
+
+        # Fechas de sesiones
+        st.sidebar.write("**Fechas de Sesiones:**")
+        fecha_sesion_1 = st.sidebar.date_input("Fecha Sesión 1")
+        fecha_sesion_2 = st.sidebar.date_input("Fecha Sesión 2")
+        fecha_sesion_3 = st.sidebar.date_input("Fecha Sesión 3")
+
         if curso_id:
             curso_id = curso_id + "-" + fecha_inicio.strftime("%Y%m%d") + "-" + fecha_fin.strftime("%Y%m%d")
-        
-        cupo_maximo = st.sidebar.number_input("Cupo Máximo", min_value=1, value=50) 
-        
+
+        cupo_maximo = st.sidebar.number_input("Cupo Máximo", min_value=1, value=50)
+
         if st.sidebar.button("Crear Curso"):
-            if curso_id and fecha_fin > fecha_inicio:
-                # Crear objeto de curso
+            # Validaciones
+            if not curso_id:
+                st.sidebar.error("⚠️ Debe ingresar un ID para el curso")
+            elif fecha_fin <= fecha_inicio:
+                st.sidebar.error("⚠️ La fecha de término debe ser posterior a la fecha de inicio")
+            else:
+                # Crear objeto de curso con región
                 nuevo_curso = {
                     'curso_id': str(curso_id),
+                    'region': region_curso,
                     'fecha_inicio': fecha_inicio.strftime('%Y-%m-%d'),
                     'fecha_fin': fecha_fin.strftime('%Y-%m-%d'),
+                    'fecha_sesion_1': fecha_sesion_1.strftime('%Y-%m-%d'),
+                    'fecha_sesion_2': fecha_sesion_2.strftime('%Y-%m-%d'),
+                    'fecha_sesion_3': fecha_sesion_3.strftime('%Y-%m-%d'),
                     'cupo_maximo': int(cupo_maximo),
                     'estado': 'ACTIVO'
                 }
-                
+
                 if crear_curso(nuevo_curso):
                     st.sidebar.success("✅ Curso creado exitosamente")
                     time.sleep(1)
@@ -259,21 +304,102 @@ try:
                 else:
                     st.sidebar.warning("No hay registros disponibles")
 
-    # Verificar curso activo y mostrar formulario
+    # Mostrar formulario de inscripción
     try:
-        # Obtener curso activo
-        curso_actual = get_curso_activo()
-        
-        if curso_actual:
-            st.title("Inscripción Curso de 20 horas Protocolo VOTME para Profesionales SST Implementadores - Empresas Adherentes de IST")
-            st.write(f"Curso: {curso_actual['curso_id']}")
-            st.write(f"Período: {curso_actual['fecha_inicio']} - {curso_actual['fecha_fin']}")
-            
+        st.title("Inscripción Curso de 20 horas Protocolo VOTME para Profesionales SST Implementadores - Empresas Adherentes de IST")
+
+        # Obtener todos los cursos
+        df_cursos = get_config_data()
+
+        if df_cursos.empty:
+            st.warning("No hay cursos disponibles. El administrador debe crear uno.")
+            st.stop()
+
+        # Filtrar cursos disponibles: fecha_fin >= hoy (cursos vigentes o futuros)
+        hoy = datetime.now().strftime('%Y-%m-%d')
+
+        if 'fecha_fin' in df_cursos.columns:
+            # Convertir fecha_fin a string para comparación si no lo es
+            df_cursos['fecha_fin_str'] = df_cursos['fecha_fin'].astype(str)
+            df_cursos_disponibles = df_cursos[df_cursos['fecha_fin_str'] >= hoy].copy()
+            df_cursos_disponibles = df_cursos_disponibles.drop(columns=['fecha_fin_str'])
+        else:
+            df_cursos_disponibles = df_cursos
+
+        if df_cursos_disponibles.empty:
+            st.warning("No hay cursos disponibles para inscripción. Todos los cursos han finalizado.")
+            st.stop()
+
+        # Paso 1: Seleccionar región del curso
+        st.subheader("1. Seleccione la región del curso")
+
+        # Obtener regiones con cursos disponibles
+        if 'region' in df_cursos_disponibles.columns:
+            regiones_con_cursos = df_cursos_disponibles['region'].unique().tolist()
+            regiones_disponibles = [r for r in regiones if r in regiones_con_cursos]
+        else:
+            regiones_disponibles = regiones
+
+        if not regiones_disponibles:
+            st.warning("No hay cursos disponibles en ninguna región.")
+            st.stop()
+
+        region_curso_seleccionada = st.selectbox(
+            "Región del curso (*)",
+            regiones_disponibles,
+            key='region_curso_inscripcion',
+            placeholder="Seleccione una región..."
+        )
+
+        # Paso 2: Seleccionar curso de esa región
+        if region_curso_seleccionada:
+            if 'region' in df_cursos_disponibles.columns:
+                cursos_region = df_cursos_disponibles[df_cursos_disponibles['region'] == region_curso_seleccionada]
+            else:
+                cursos_region = df_cursos_disponibles
+
+            if cursos_region.empty:
+                st.warning(f"No hay cursos disponibles en {region_curso_seleccionada}.")
+                st.stop()
+
+            st.subheader("2. Seleccione el curso")
+
+            # Crear lista de cursos con información útil
+            opciones_cursos = []
+            for _, curso in cursos_region.iterrows():
+                curso_info = f"{curso['curso_id']} ({curso['fecha_inicio']} al {curso['fecha_fin']})"
+                opciones_cursos.append(curso_info)
+
+            curso_seleccionado_info = st.selectbox(
+                "Curso (*)",
+                opciones_cursos,
+                key='curso_seleccionado_inscripcion'
+            )
+
+            # Obtener el curso seleccionado
+            idx_curso = opciones_cursos.index(curso_seleccionado_info)
+            curso_actual = cursos_region.iloc[idx_curso].to_dict()
+
+            # Mostrar información del curso seleccionado
+            st.info(f"**Curso seleccionado:** {curso_actual['curso_id']}")
+            st.write(f"**Período:** {curso_actual['fecha_inicio']} - {curso_actual['fecha_fin']}")
+
+            # Mostrar fechas de sesiones si están disponibles
+            if 'fecha_sesion_1' in curso_actual:
+                st.write("**Fechas de Sesiones:**")
+                col_s1, col_s2, col_s3 = st.columns(3)
+                with col_s1:
+                    st.write(f"📅 Sesión 1: {curso_actual['fecha_sesion_1']}")
+                with col_s2:
+                    st.write(f"📅 Sesión 2: {curso_actual['fecha_sesion_2']}")
+                with col_s3:
+                    st.write(f"📅 Sesión 3: {curso_actual['fecha_sesion_3']}")
+
             # Verificar cupos disponibles
             df_registros = get_registros_data()
             if not df_registros.empty:
                 inscritos_actuales = len(df_registros[df_registros['curso_id'] == curso_actual['curso_id']])
-                cupos_disponibles = curso_actual['cupo_maximo'] - inscritos_actuales
+                cupos_disponibles = int(curso_actual['cupo_maximo']) - inscritos_actuales
             else:
                 inscritos_actuales = 0
                 cupos_disponibles = int(curso_actual['cupo_maximo'])
@@ -290,9 +416,24 @@ try:
             if cupos_disponibles <= 0:
                 st.error("Lo sentimos, este curso ha alcanzado el límite máximo de inscripciones.")
                 st.stop()
-            
-            # Formulario de inscripción
-            region = st.selectbox("Región (*)", regiones, key='region', on_change=update_comunas_state)
+
+            st.divider()
+
+            # Paso 3: Formulario de inscripción
+            st.subheader("3. Complete sus datos")
+
+            # Región y comuna del participante (puede ser diferente a la del curso)
+            st.write("**Datos de ubicación del participante:**")
+
+            # Inicializar comunas en la primera carga si no existen
+            if 'comunas' not in st.session_state or not st.session_state.comunas:
+                # Cargar comunas de la primera región por defecto
+                for reg in comunas_regiones["regiones"]:
+                    if reg["region"] == regiones[0]:
+                        st.session_state.comunas = reg["comunas"]
+                        break
+
+            region = st.selectbox("Región del participante (*)", regiones, key='region', on_change=update_comunas_state)
             comuna = st.selectbox("Comuna (*)", st.session_state.get('comunas', []), key='comuna')
 
             with st.form("registro_form"):
@@ -394,10 +535,9 @@ try:
                         st.info("Aún no hay inscritos en este curso")
                 else:
                     st.info("Aún no hay inscritos en este curso")
-        else:
-            st.warning("No hay ningún curso activo. El administrador debe crear uno.")
+
     except Exception as e:
-        st.error(f"Error al verificar curso activo: {str(e)}")
+        st.error(f"Error al cargar cursos: {str(e)}")
 
 except Exception as e:
     st.error(f"Error en la aplicación: {str(e)}")
