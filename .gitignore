@@ -1,4 +1,6 @@
 .streamlit/secrets.toml
 *.gs
+!*.template.gs
 .claude
 .devcontainer
+__pycache__/
