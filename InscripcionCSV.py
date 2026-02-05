@@ -621,7 +621,8 @@ try:
                             time.sleep(2)
                             st.rerun()
             
-            # Botón para ver inscritos
+            st.info("Para ver los inscritos, por favor, contacte al administrador del sistema.")
+            """# Botón para ver inscritos
             if st.button("Ver inscritos"):
                 df_registros = get_registros_data()
                 if not df_registros.empty:
@@ -643,7 +644,7 @@ try:
                     else:
                         st.info("Aún no hay inscritos en este curso")
                 else:
-                    st.info("Aún no hay inscritos en este curso")
+                    st.info("Aún no hay inscritos en este curso")"""
 
     except Exception as e:
         st.error(f"Error al cargar cursos: {str(e)}")
