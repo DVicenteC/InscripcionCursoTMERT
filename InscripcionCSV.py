@@ -620,31 +620,6 @@ try:
                             st.balloons()
                             time.sleep(2)
                             st.rerun()
-            
-            st.info("Para ver los inscritos, por favor, contacte al administrador del sistema.")
-            """# Botón para ver inscritos
-            if st.button("Ver inscritos"):
-                df_registros = get_registros_data()
-                if not df_registros.empty:
-                    registros_curso = df_registros[df_registros['curso_id'] == curso_actual['curso_id']]
-
-                    if not registros_curso.empty:
-                        # Mostrar métricas de cupos en la parte superior
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric("Cupo Máximo", curso_actual['cupo_maximo'])
-                        with col2:
-                            st.metric("Inscritos", len(registros_curso))
-                        with col3:
-                            st.metric("Cupos Disponibles", int(curso_actual['cupo_maximo']) - len(registros_curso))
-
-                        # Mostrar la tabla de inscritos
-                        st.write("### Lista de Inscritos")
-                        st.write(registros_curso)
-                    else:
-                        st.info("Aún no hay inscritos en este curso")
-                else:
-                    st.info("Aún no hay inscritos en este curso")"""
 
     except Exception as e:
         st.error(f"Error al cargar cursos: {str(e)}")
