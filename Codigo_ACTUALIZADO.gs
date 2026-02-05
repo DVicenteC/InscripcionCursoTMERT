@@ -580,6 +580,19 @@ function getAsistencias() {
 
 // Función para agregar una nueva asistencia
 function addAsistencia(data) {
+  // OPTIMIZACIÓN: Usar LockService para evitar race conditions con 50 usuarios simultáneos
+  const lock = LockService.getScriptLock();
+
+  try {
+    // Intentar obtener el lock, esperar hasta 10 segundos
+    lock.waitLock(10000);
+  } catch (e) {
+    return {
+      success: false,
+      error: 'Sistema ocupado procesando otras solicitudes. Por favor, intente nuevamente en unos segundos.'
+    };
+  }
+
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     let sheet = ss.getSheetByName(SHEET_NAME_ASISTENCIAS);
@@ -595,12 +608,22 @@ function addAsistencia(data) {
       sheet.getRange('A1:G1').setFontColor('white');
     }
 
-    // Verificar si ya existe un registro para este RUT, curso y sesión
-    const existingData = sheet.getDataRange().getValues();
-    for (let i = 1; i < existingData.length; i++) {
-      if (existingData[i][1] === data.curso_id &&
-          existingData[i][2] === data.rut &&
-          existingData[i][3] === data.sesion) {
+    // OPTIMIZACIÓN: Solo leer columnas necesarias (B, C, D) en lugar de toda la hoja
+    const lastRow = sheet.getLastRow();
+
+    if (lastRow > 1) {
+      // Leer solo las columnas curso_id (B), rut (C), sesion (D)
+      const searchRange = sheet.getRange(2, 2, lastRow - 1, 3);
+      const existingData = searchRange.getValues();
+
+      // OPTIMIZACIÓN: Usar find() más eficiente que loop manual
+      const duplicate = existingData.find(row =>
+        row[0] === data.curso_id &&
+        row[1] === data.rut &&
+        row[2] === data.sesion
+      );
+
+      if (duplicate) {
         return {
           success: false,
           error: 'Ya existe un registro de asistencia para este participante en esta sesión'
@@ -608,31 +631,38 @@ function addAsistencia(data) {
       }
     }
 
-    // Generar ID único
-    const lastRow = sheet.getLastRow();
-    const newId = lastRow; // Simple incremental ID
+    // Generar ID único con timestamp para mayor unicidad
+    const timestamp = new Date().getTime();
+    const newId = `ASIST-${timestamp}-${lastRow}`;
 
-    // Agregar nueva fila
+    // Agregar nueva fila con fecha actual si no se proporcionó
+    const fechaRegistro = data.fecha_registro || new Date().toISOString();
+
     sheet.appendRow([
       newId,
       data.curso_id,
       data.rut,
       data.sesion,
-      data.fecha_registro,
-      data.estado,
-      data.metodo
+      fechaRegistro,
+      data.estado || 'presente',
+      data.metodo || 'manual'
     ]);
 
     return {
       success: true,
-      message: 'Asistencia registrada correctamente'
+      message: 'Asistencia registrada correctamente',
+      id: newId
     };
 
   } catch (error) {
+    console.error('Error en addAsistencia:', error);
     return {
       success: false,
       error: error.toString()
     };
+  } finally {
+    // CRÍTICO: Siempre liberar el lock, incluso si hay error
+    lock.releaseLock();
   }
 }
 

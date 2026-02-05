@@ -30,6 +30,7 @@ with open(COMUNAS_REGIONES_PATH, "r", encoding='utf-8') as file:
 regiones = [region["region"] for region in comunas_regiones["regiones"]]
 
 # Función para obtener datos de configuración desde la API
+@st.cache_data(ttl=300)  # Cache por 5 minutos
 def get_config_data():
     try:
         response = requests.get(f"{API_URL}?action=getConfig&key={API_KEY}")
@@ -37,8 +38,16 @@ def get_config_data():
         
         if data['success']:
             df = pd.DataFrame(data['cursos'])
-            if not df.empty and 'cupo_maximo' in df.columns:
-                df['cupo_maximo'] = pd.to_numeric(df['cupo_maximo'], errors='coerce')
+            if not df.empty:
+                # Convertir columnas de fecha a datetime (probando múltiples formatos)
+                date_cols = ['fecha_inicio', 'fecha_fin', 'fecha_sesion_1', 'fecha_sesion_2', 'fecha_sesion_3']
+                for col in date_cols:
+                    if col in df.columns:
+                        # Intentar parsear sin formato específico (pandas detecta automáticamente)
+                        df[col] = pd.to_datetime(df[col], errors='coerce')
+
+                if 'cupo_maximo' in df.columns:
+                    df['cupo_maximo'] = pd.to_numeric(df['cupo_maximo'], errors='coerce')
             return df
         else:
             st.error(f"Error al obtener configuración: {data.get('error', 'Error desconocido')}")
@@ -48,6 +57,7 @@ def get_config_data():
         return pd.DataFrame()
 
 # Función para obtener registros desde la API
+@st.cache_data(ttl=180)  # Cache por 3 minutos (se actualiza más frecuentemente)
 def get_registros_data():
     try:
         response = requests.get(f"{API_URL}?action=getRegistros&key={API_KEY}")
@@ -101,30 +111,88 @@ def crear_curso(curso_data):
         return False
 
 # Función para guardar un nuevo registro
-def guardar_registro(registro):
+def guardar_registro(registro, max_retries=3):
+    """
+    Guarda registro de participante con retry logic.
+
+    Args:
+        registro: Diccionario con datos del participante
+        max_retries: Número máximo de reintentos (default: 3)
+
+    Returns:
+        True si se guardó exitosamente, False en caso contrario
+    """
+    import random
+
+    for attempt in range(max_retries):
+        try:
+            # Agregar pequeño delay aleatorio en reintentos
+            if attempt > 0:
+                jitter = random.uniform(0.5, 2.0)
+                time.sleep(jitter)
+                st.info(f"🔄 Reintentando... (intento {attempt + 1}/{max_retries})")
+
+            response = requests.post(
+                API_URL,
+                params={"action": "addRegistro", "key": API_KEY},
+                json=registro,
+                timeout=15  # Timeout de 15 segundos
+            )
+            data = response.json()
+
+            if data['success']:
+                return True
+            else:
+                error_msg = data.get('error', 'Error desconocido')
+
+                # Si el error es "sistema ocupado", reintentar
+                if 'ocupado' in error_msg.lower() or 'busy' in error_msg.lower():
+                    if attempt < max_retries - 1:
+                        continue  # Reintentar
+                    else:
+                        st.error(f"⚠️ Sistema sobrecargado. Por favor, intente nuevamente.")
+                        return False
+
+                # Otro tipo de error
+                else:
+                    st.error(f"Error al guardar registro: {error_msg}")
+                    return False
+
+        except requests.exceptions.Timeout:
+            if attempt < max_retries - 1:
+                st.warning(f"⏱️ Tiempo de espera agotado. Reintentando...")
+                continue
+            else:
+                st.error(f"❌ Timeout después de {max_retries} intentos.")
+                return False
+
+        except Exception as e:
+            if attempt < max_retries - 1:
+                continue
+            else:
+                st.error(f"Error al conectar con la API: {str(e)}")
+                return False
+
+    return False
+
+# Función auxiliar para formatear fechas
+def formato_fecha_dd_mm_yyyy(fecha):
+    """Convierte una fecha a formato dd-mm-yyyy para mostrar al usuario"""
+    if pd.isna(fecha):
+        return ""
     try:
-        response = requests.post(
-            API_URL,
-            params={"action": "addRegistro", "key": API_KEY},
-            json=registro
-        )
-        data = response.json()
-        
-        if data['success']:
-            return True
-        else:
-            st.error(f"Error al guardar registro: {data.get('error', 'Error desconocido')}")
-            return False
-    except Exception as e:
-        st.error(f"Error al conectar con la API: {str(e)}")
-        return False
+        if isinstance(fecha, str):
+            fecha = pd.to_datetime(fecha)
+        return fecha.strftime('%d-%m-%Y')
+    except:
+        return str(fecha)
 
 # Función para obtener el curso activo
 def get_curso_activo():
     try:
         response = requests.get(f"{API_URL}?action=getCursoActivo&key={API_KEY}")
         data = response.json()
-        
+
         if data['success']:
             return data['curso']
         else:
@@ -149,6 +217,12 @@ try:
     # Panel de Administración
     st.sidebar.title("Panel de Control")
     password = st.sidebar.text_input("Contraseña", type="password")
+
+    # Botón para limpiar cache (útil cuando hay actualizaciones)
+    if st.sidebar.button("🔄 Actualizar Datos"):
+        st.cache_data.clear()
+        st.sidebar.success("✅ Cache limpiado. Datos actualizados.")
+        st.rerun()
 
     if password == SECRET_PASSWORD:
         st.sidebar.success("✅ Acceso concedido")
@@ -205,7 +279,26 @@ try:
             key="region_nuevo_curso"
         )
 
-        curso_id = st.sidebar.text_input("ID del Curso")
+        # Mapeo de regiones a códigos cortos
+        region_codigo_map = {
+            "Región de Arica y Parinacota": "ARI",
+            "Región de Tarapacá": "TAR",
+            "Región de Antofagasta": "ANT",
+            "Región de Atacama": "ATA",
+            "Región de Coquimbo": "COQ",
+            "Región de Valparaíso": "VAL",
+            "Región Metropolitana de Santiago": "RM",
+            "Región del Libertador Gral. Bernardo O'Higgins": "OHI",
+            "Región del Maule": "MAU",
+            "Región de Ñuble": "ÑUB",
+            "Región del Biobío": "BIO",
+            "Región de la Araucanía": "ARA",
+            "Región de Los Ríos": "RIO",
+            "Región de Los Lagos": "LAG",
+            "Región Aysén del Gral. Carlos Ibáñez del Campo": "AYS",
+            "Región de Magallanes y de la Antártica Chilena": "MAG"
+        }
+
         fecha_inicio = st.sidebar.date_input("Fecha de Inicio")
         fecha_fin = st.sidebar.date_input("Fecha de Término")
 
@@ -215,8 +308,23 @@ try:
         fecha_sesion_2 = st.sidebar.date_input("Fecha Sesión 2")
         fecha_sesion_3 = st.sidebar.date_input("Fecha Sesión 3")
 
-        if curso_id:
-            curso_id = curso_id + "-" + fecha_inicio.strftime("%Y%m%d") + "-" + fecha_fin.strftime("%Y%m%d")
+        # Generar ID automáticamente en formato: CódigoRegión-MesAño
+        meses_esp = {
+            1: "Ene", 2: "Feb", 3: "Mar", 4: "Abr", 5: "May", 6: "Jun",
+            7: "Jul", 8: "Ago", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dic"
+        }
+        mes_nombre = meses_esp[fecha_inicio.month]
+        anio_corto = str(fecha_inicio.year)[2:]  # Últimos 2 dígitos del año
+        codigo_region = region_codigo_map.get(region_curso, "OTR")
+
+        curso_id_generado = f"{codigo_region}-{mes_nombre}{anio_corto}"
+
+        # Mostrar ID generado (editable por si necesitan ajustarlo)
+        curso_id = st.sidebar.text_input(
+            "ID del Curso (Auto-generado)",
+            value=curso_id_generado,
+            help="Puede editar el ID si es necesario. Formato: CódigoRegión-MesAño"
+        )
 
         cupo_maximo = st.sidebar.number_input("Cupo Máximo", min_value=1, value=50)
 
@@ -231,11 +339,11 @@ try:
                 nuevo_curso = {
                     'curso_id': str(curso_id),
                     'region': region_curso,
-                    'fecha_inicio': fecha_inicio.strftime('%Y-%m-%d'),
-                    'fecha_fin': fecha_fin.strftime('%Y-%m-%d'),
-                    'fecha_sesion_1': fecha_sesion_1.strftime('%Y-%m-%d'),
-                    'fecha_sesion_2': fecha_sesion_2.strftime('%Y-%m-%d'),
-                    'fecha_sesion_3': fecha_sesion_3.strftime('%Y-%m-%d'),
+                    'fecha_inicio': fecha_inicio.strftime('%d-%m-%Y'),
+                    'fecha_fin': fecha_fin.strftime('%d-%m-%Y'),
+                    'fecha_sesion_1': fecha_sesion_1.strftime('%d-%m-%Y'),
+                    'fecha_sesion_2': fecha_sesion_2.strftime('%d-%m-%Y'),
+                    'fecha_sesion_3': fecha_sesion_3.strftime('%d-%m-%Y'),
                     'cupo_maximo': int(cupo_maximo),
                     'estado': 'ACTIVO'
                 }
@@ -316,13 +424,14 @@ try:
             st.stop()
 
         # Filtrar cursos disponibles: fecha_fin >= hoy (cursos vigentes o futuros)
-        hoy = datetime.now().strftime('%Y-%m-%d')
+        hoy = pd.Timestamp.now().normalize()
 
         if 'fecha_fin' in df_cursos.columns:
-            # Convertir fecha_fin a string para comparación si no lo es
-            df_cursos['fecha_fin_str'] = df_cursos['fecha_fin'].astype(str)
-            df_cursos_disponibles = df_cursos[df_cursos['fecha_fin_str'] >= hoy].copy()
-            df_cursos_disponibles = df_cursos_disponibles.drop(columns=['fecha_fin_str'])
+            # Convertir ambas fechas a la misma zona horaria (sin timezone)
+            df_cursos_copia = df_cursos.copy()
+            df_cursos_copia['fecha_fin'] = pd.to_datetime(df_cursos_copia['fecha_fin']).dt.tz_localize(None)
+            # Filtrar cursos donde la fecha_fin sea mayor o igual a hoy
+            df_cursos_disponibles = df_cursos_copia[df_cursos_copia['fecha_fin'] >= hoy].copy()
         else:
             df_cursos_disponibles = df_cursos
 
@@ -367,7 +476,7 @@ try:
             # Crear lista de cursos con información útil
             opciones_cursos = []
             for _, curso in cursos_region.iterrows():
-                curso_info = f"{curso['curso_id']} ({curso['fecha_inicio']} al {curso['fecha_fin']})"
+                curso_info = f"{curso['curso_id']}"
                 opciones_cursos.append(curso_info)
 
             curso_seleccionado_info = st.selectbox(
@@ -382,18 +491,18 @@ try:
 
             # Mostrar información del curso seleccionado
             st.info(f"**Curso seleccionado:** {curso_actual['curso_id']}")
-            st.write(f"**Período:** {curso_actual['fecha_inicio']} - {curso_actual['fecha_fin']}")
+            st.write(f"**Período:** {formato_fecha_dd_mm_yyyy(curso_actual['fecha_inicio'])} - {formato_fecha_dd_mm_yyyy(curso_actual['fecha_fin'])}")
 
             # Mostrar fechas de sesiones si están disponibles
             if 'fecha_sesion_1' in curso_actual:
                 st.write("**Fechas de Sesiones:**")
                 col_s1, col_s2, col_s3 = st.columns(3)
                 with col_s1:
-                    st.write(f"📅 Sesión 1: {curso_actual['fecha_sesion_1']}")
+                    st.write(f"📅 Sesión 1: {formato_fecha_dd_mm_yyyy(curso_actual['fecha_sesion_1'])}")
                 with col_s2:
-                    st.write(f"📅 Sesión 2: {curso_actual['fecha_sesion_2']}")
+                    st.write(f"📅 Sesión 2: {formato_fecha_dd_mm_yyyy(curso_actual['fecha_sesion_2'])}")
                 with col_s3:
-                    st.write(f"📅 Sesión 3: {curso_actual['fecha_sesion_3']}")
+                    st.write(f"📅 Sesión 3: {formato_fecha_dd_mm_yyyy(curso_actual['fecha_sesion_3'])}")
 
             # Verificar cupos disponibles
             df_registros = get_registros_data()
