@@ -8,7 +8,7 @@ from rut_chile import rut_chile
 import io
 
 # Configuración básica
-st.set_page_config(page_title="Registro de Participantes", layout="wide")
+st.set_page_config(page_title="Inscripción de Participantes", layout="wide")
 
 # Constantes
 COMUNAS_REGIONES_PATH = "comunas-regiones.json"
