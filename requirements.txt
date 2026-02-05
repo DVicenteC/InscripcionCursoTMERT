@@ -5,3 +5,4 @@ rut-chile>=1.2.0
 openpyxl>=3.1.2
 XlsxWriter>=3.1.9
 requests>=2.31.0
+duckdb>=0.10.0
