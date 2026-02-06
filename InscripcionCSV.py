@@ -579,13 +579,13 @@ try:
                     else:
                         cupos_disponibles = int(curso_actual['cupo_maximo'])
 
-                    # Normalizar RUT para comparación
-                    rut_normalizado = rut.replace(".", "").replace(" ", "").upper().strip()
+                    # Normalizar RUT para comparación (formato estándar: 12345678-5)
+                    rut_normalizado = rut_chile.format_rut(rut, dots=False).upper()
 
                     # Verificar si el usuario ya está inscrito en este curso
                     if not df_registros.empty:
                         # Normalizar todos los RUTs en el dataframe para comparación
-                        df_registros['rut_normalizado'] = df_registros['rut'].str.replace(".", "", regex=False).str.replace(" ", "").str.upper().str.strip()
+                        df_registros['rut_normalizado'] = df_registros['rut'].apply(lambda x: rut_chile.format_rut(str(x), dots=False).upper() if x else '')
 
                         usuario_ya_inscrito = df_registros[
                             (df_registros['rut_normalizado'] == rut_normalizado) &
@@ -611,9 +611,9 @@ try:
                     #elif '@gmail.com' not in gmail.lower():
                     #    st.error("Debe ingresar un correo Gmail válido")
                     else:
-                        # Normalizar RUTs antes de guardar (quitar puntos y espacios)
-                        rut_limpio = rut.replace(".", "").replace(" ", "").upper().strip()
-                        rut_empresa_limpio = rut_empresa.replace(".", "").replace(" ", "").upper().strip()
+                        # Normalizar RUTs al formato estándar: 12345678-5 (sin puntos, con guión)
+                        rut_limpio = rut_chile.format_rut(rut, dots=False).upper()
+                        rut_empresa_limpio = rut_chile.format_rut(rut_empresa, dots=False).upper()
 
                         # Preparar nuevo registro
                         nuevo_registro = {
