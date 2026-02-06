@@ -579,6 +579,24 @@ try:
                     else:
                         cupos_disponibles = int(curso_actual['cupo_maximo'])
 
+                    # Normalizar RUT para comparación
+                    rut_normalizado = rut.replace(".", "").replace(" ", "").upper().strip()
+
+                    # Verificar si el usuario ya está inscrito en este curso
+                    if not df_registros.empty:
+                        # Normalizar todos los RUTs en el dataframe para comparación
+                        df_registros['rut_normalizado'] = df_registros['rut'].str.replace(".", "", regex=False).str.replace(" ", "").str.upper().str.strip()
+
+                        usuario_ya_inscrito = df_registros[
+                            (df_registros['rut_normalizado'] == rut_normalizado) &
+                            (df_registros['curso_id'] == curso_actual['curso_id'])
+                        ]
+
+                        if not usuario_ya_inscrito.empty:
+                            st.error("⚠️ Ya estás inscrito en este curso")
+                            st.info(f"📅 Inscripción registrada el: {usuario_ya_inscrito.iloc[0]['fecha_registro']}")
+                            st.stop()  # Detener ejecución
+
                     if cupos_disponibles <= 0:
                         st.error("Lo sentimos, mientras se procesaba su solicitud se agotaron los cupos disponibles.")
                     elif not all([rut, nombres, apellido_paterno, nacionalidad, email, gmail,
@@ -592,12 +610,16 @@ try:
                         st.error("Correo electrónico inválido")
                     #elif '@gmail.com' not in gmail.lower():
                     #    st.error("Debe ingresar un correo Gmail válido")
-                    else:    
+                    else:
+                        # Normalizar RUTs antes de guardar (quitar puntos y espacios)
+                        rut_limpio = rut.replace(".", "").replace(" ", "").upper().strip()
+                        rut_empresa_limpio = rut_empresa.replace(".", "").replace(" ", "").upper().strip()
+
                         # Preparar nuevo registro
                         nuevo_registro = {
                             'fecha_registro': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                             'curso_id': curso_actual['curso_id'],
-                            'rut': rut,
+                            'rut': rut_limpio,
                             'nombres': nombres,
                             'apellido_paterno': apellido_paterno,
                             'apellido_materno': apellido_materno,
@@ -606,7 +628,7 @@ try:
                             'gmail': gmail,
                             'sexo': sexo,
                             'rol': rol,
-                            'rut_empresa': rut_empresa,
+                            'rut_empresa': rut_empresa_limpio,
                             'razon_social': razon_social,
                             'region': region,
                             'comuna': comuna,
