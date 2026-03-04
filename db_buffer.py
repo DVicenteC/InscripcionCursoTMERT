@@ -62,6 +62,10 @@ class AsistenciaBuffer:
 
         self._init_database()
 
+        # Hidratar desde Google Sheets para recuperar estado tras reinicios
+        if self.api_url and self.api_key:
+            self.hydrate_from_sheets()
+
         # Iniciar sincronización automática si está habilitada
         if auto_sync_interval > 0:
             self._start_auto_sync()
@@ -276,6 +280,61 @@ class AsistenciaBuffer:
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
+    def hydrate_from_sheets(self):
+        """
+        Carga asistencias existentes desde Google Sheets al iniciar el buffer.
+        Evita duplicados cuando la app se reinicia y el buffer queda vacío.
+
+        Returns:
+            int: Número de registros cargados desde Sheets
+        """
+        try:
+            response = requests.get(
+                self.api_url,
+                params={"action": "getAsistencias", "key": self.api_key},
+                timeout=15
+            )
+            data = response.json()
+
+            if not data.get('success') or not data.get('asistencias'):
+                return 0
+
+            cargados = 0
+            for asist in data['asistencias']:
+                try:
+                    # ID consistente para registros provenientes de Sheets
+                    asist_id = f"SHEETS-{asist.get('curso_id','')}-{asist.get('rut','')}-{asist.get('sesion','')}"
+
+                    # Parsear fecha con fallback (compatible con sufijo Z de Apps Script)
+                    try:
+                        fecha_pd = pd.to_datetime(str(asist['fecha_registro']), utc=True, errors='coerce')
+                        fecha = fecha_pd.to_pydatetime().replace(tzinfo=None) if pd.notna(fecha_pd) else datetime.now()
+                    except Exception:
+                        fecha = datetime.now()
+
+                    self.conn.execute("""
+                        INSERT INTO asistencias_buffer
+                        (id, curso_id, rut, sesion, fecha_registro, estado, metodo, sincronizado)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, true)
+                        ON CONFLICT (curso_id, rut, sesion) DO NOTHING
+                    """, [
+                        asist_id,
+                        str(asist.get('curso_id', '')),
+                        str(asist.get('rut', '')),
+                        int(asist.get('sesion', 0)),
+                        fecha,
+                        str(asist.get('estado', 'presente')),
+                        'sheets_hydration'
+                    ])
+                    cargados += 1
+                except Exception:
+                    continue
+
+            return cargados
+
+        except Exception:
+            return 0  # Si falla la hidratación, el buffer sigue funcionando normal
+
     def _start_auto_sync(self):
         """Inicia thread de sincronización automática."""
         def sync_loop():
@@ -380,13 +439,20 @@ class AsistenciaBuffer:
         Returns:
             int: Número de registros eliminados
         """
-        result = self.conn.execute("""
-            DELETE FROM asistencias_buffer
-            WHERE sincronizado = true
-              AND created_at < CURRENT_TIMESTAMP - INTERVAL ? DAY
-        """, [dias])
+        if dias <= 0:
+            # dias=0 → borrar todos los sincronizados sin filtro de tiempo
+            result = self.conn.execute("""
+                DELETE FROM asistencias_buffer
+                WHERE sincronizado = true
+            """)
+        else:
+            result = self.conn.execute("""
+                DELETE FROM asistencias_buffer
+                WHERE sincronizado = true
+                  AND created_at < CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (? * INTERVAL '1 day')
+            """, [dias])
 
-        return result.fetchone()[0]
+        return result.rowcount
 
     def close(self):
         """Cierra conexión y detiene sincronización automática."""
@@ -414,7 +480,7 @@ def get_buffer():
     """
     return AsistenciaBuffer(
         db_path="asistencias_buffer.duckdb",
-        auto_sync_interval=60  # Sincronizar cada 60 segundos
+        auto_sync_interval=15  # Sincronizar cada 15 segundos
     )
 
 

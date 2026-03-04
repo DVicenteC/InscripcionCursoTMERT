@@ -29,7 +29,7 @@ import io
 from db_buffer import get_buffer
 
 # Configuración básica
-st.set_page_config(page_title="Registro de Asistencia", layout="wide")
+st.set_page_config(page_title="Registro de Asistencia", layout="wide", initial_sidebar_state="collapsed")
 
 # Constantes
 SECRET_PASSWORD = st.secrets["SECRET_PASSWORD"]
@@ -52,7 +52,11 @@ def get_config_data():
                 date_cols = ['fecha_inicio', 'fecha_fin', 'fecha_sesion_1', 'fecha_sesion_2', 'fecha_sesion_3']
                 for col in date_cols:
                     if col in df.columns:
-                        df[col] = pd.to_datetime(df[col], errors='coerce')
+                        # La API devuelve ISO con timezone (ej: 2026-03-04T03:00:00.000Z)
+                        # Se convierte a UTC naive y se normaliza a medianoche para comparar solo la fecha
+                        df[col] = (pd.to_datetime(df[col], utc=True, errors='coerce')
+                                   .dt.tz_convert(None)
+                                   .dt.normalize())
 
                 df['cupo_maximo'] = pd.to_numeric(df['cupo_maximo'], errors='coerce')
             return df
@@ -205,41 +209,51 @@ def main():
     # Obtener instancia del buffer
     buffer = get_buffer()
 
-    # ==================== SIDEBAR CON ESTADÍSTICAS ====================
+    # ==================== SIDEBAR CON PANEL ADMIN ====================
 
     st.sidebar.title("🔐 Panel de Control")
 
-    # Mostrar estadísticas del buffer
-    st.sidebar.subheader("📊 Estado del Buffer")
-    stats = buffer.get_estadisticas()
-
-    col1, col2 = st.sidebar.columns(2)
-    with col1:
-        st.metric("Total", stats['total'])
-        st.metric("Sincronizadas", stats['sincronizadas'])
-    with col2:
-        st.metric("Pendientes", stats['pendientes'])
-        st.metric("Fallidas", stats['fallidas'])
-
-    # Botón para forzar sincronización
-    if st.sidebar.button("🔄 Sincronizar Ahora"):
-        with st.spinner("Sincronizando con Google Sheets..."):
-            resultado = buffer.sincronizar(batch_size=100)
-
-        st.sidebar.success(f"✅ Sincronizados: {resultado['sincronizados']}")
-        if resultado['fallidos'] > 0:
-            st.sidebar.warning(f"⚠️ Fallidos: {resultado['fallidos']}")
-
-    # Botón para limpiar cache
-    if st.sidebar.button("🗑️ Limpiar Sincronizados"):
-        eliminados = buffer.limpiar_sincronizados(dias=1)
-        st.sidebar.success(f"✅ Eliminados: {eliminados} registros")
-
-    st.sidebar.divider()
-
-    # Panel administrativo
+    # Panel administrativo - primero la contraseña
     password = st.sidebar.text_input("Contraseña Admin", type="password")
     admin_mode = password == SECRET_PASSWORD
+
+    if admin_mode:
+        st.sidebar.success("✅ Acceso administrativo concedido")
+
+        # Mostrar estadísticas del buffer
+        st.sidebar.subheader("📊 Estado del Buffer")
+        stats = buffer.get_estadisticas()
+
+        col1, col2 = st.sidebar.columns(2)
+        with col1:
+            st.sidebar.metric("Total", stats['total'])
+            st.sidebar.metric("Sincronizadas", stats['sincronizadas'])
+        with col2:
+            st.sidebar.metric("Pendientes", stats['pendientes'])
+            st.sidebar.metric("Fallidas", stats['fallidas'])
+
+        # Botón para forzar sincronización
+        if st.sidebar.button("🔄 Sincronizar Ahora"):
+            with st.spinner("Sincronizando con Google Sheets..."):
+                resultado = buffer.sincronizar(batch_size=100)
+
+            st.sidebar.success(f"✅ Sincronizados: {resultado['sincronizados']}")
+            if resultado['fallidos'] > 0:
+                st.sidebar.warning(f"⚠️ Fallidos: {resultado['fallidos']}")
+
+        # Botón para limpiar todos los sincronizados (incluye los de hoy)
+        if st.sidebar.button("🗑️ Limpiar Sincronizados"):
+            eliminados = buffer.limpiar_sincronizados(dias=0)
+            st.sidebar.success(f"✅ Eliminados: {eliminados} registros")
+
+        # Botón para borrar TODO el buffer y re-hidratar desde Sheets
+        if st.sidebar.button("🚨 Borrar Todo el Buffer", type="primary"):
+            buffer.conn.execute("DELETE FROM asistencias_buffer")
+            buffer.hydrate_from_sheets()  # Recargar lo que ya está en Sheets
+            st.sidebar.success("✅ Buffer vaciado y recargado desde Sheets")
+            st.rerun()
+
+        st.sidebar.divider()
 
     # ==================== MODO PARTICIPANTE (SIN PASSWORD) ====================
 
@@ -296,8 +310,9 @@ def main():
                                 )
 
                                 if resultado['success']:
-                                    st.success(f"✅ ¡Asistencia registrada para {datos['nombre']}!")
-                                    st.info("📤 Tu asistencia se sincronizará automáticamente con Google Sheets en los próximos 60 segundos.")
+                                    nombre_completo = f"{datos.get('nombres', '')} {datos.get('apellido_paterno', '')}".strip() or rut_input
+                                    st.success(f"✅ ¡Asistencia registrada para {nombre_completo}!")
+                                    st.balloons()
                                 else:
                                     st.warning(f"ℹ️ {resultado['message']}")
 
@@ -306,8 +321,6 @@ def main():
     # ==================== MODO ADMIN ====================
 
     if admin_mode:
-        st.sidebar.success("✅ Acceso administrativo concedido")
-
         # Tabs para diferentes funciones
         tab1, tab2, tab3 = st.tabs(["📝 Gestionar Asistencia", "📊 Ver Asistencias", "🔧 Mantenimiento"])
 
