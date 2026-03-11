@@ -190,9 +190,10 @@ def validar_participante_inscrito(rut, curso_id, df_registros):
     if df_registros.empty:
         return False, None
 
-    # Buscar participante en el curso
+    # Buscar participante — comparación case-insensitive (ej: 12345678-k == 12345678-K)
+    rut_norm = str(rut).upper().strip()
     participante = df_registros[
-        (df_registros['rut'] == rut) &
+        (df_registros['rut'].astype(str).str.upper().str.strip() == rut_norm) &
         (df_registros['curso_id'] == curso_id)
     ]
 
@@ -271,50 +272,52 @@ def main():
         # Mostrar cursos disponibles
         st.subheader("📅 Cursos con Sesión Hoy")
 
-        for _, curso in df_cursos_hoy.iterrows():
-            with st.expander(f"📚 {curso['curso_id']} - Sesión {curso['sesion_hoy']}"):
-                st.write(f"**Región:** {curso.get('region', 'N/A')}")
-                st.write(f"**Fecha:** {curso['fecha_sesion_hoy'].strftime('%d-%m-%Y')}")
-                st.write(f"**Sesión:** {curso['sesion_hoy']} de 3")
+        @st.fragment
+        def formulario_asistencia(curso_id, sesion_hoy, region, fecha_str):
+            with st.expander(f"📚 {curso_id} - Sesión {sesion_hoy}", expanded=True):
+                st.write(f"**Región:** {region}")
+                st.write(f"**Fecha:** {fecha_str}")
+                st.write(f"**Sesión:** {sesion_hoy} de 3")
 
-                # Formulario para marcar asistencia
-                with st.form(key=f"form_{curso['curso_id']}_{curso['sesion_hoy']}"):
+                with st.form(key=f"form_{curso_id}_{sesion_hoy}", clear_on_submit=True):
                     rut_input = st.text_input(
                         "Ingresa tu RUT (sin puntos, con guión)",
                         placeholder="12345678-9"
                     )
-
                     submit = st.form_submit_button("✅ Marcar Asistencia")
 
                     if submit and rut_input:
-                        # Validar RUT
+                        rut_input = rut_input.strip().upper()
                         if not rut_chile.is_valid_rut(rut_input):
                             st.error("❌ RUT inválido. Verifica el formato.")
                         else:
-                            # Verificar inscripción
                             df_registros = get_registros_data()
                             esta_inscrito, datos = validar_participante_inscrito(
-                                rut_input,
-                                curso['curso_id'],
-                                df_registros
+                                rut_input, curso_id, df_registros
                             )
-
                             if not esta_inscrito:
                                 st.error("❌ No estás inscrito en este curso. Contacta al administrador.")
                             else:
-                                # Marcar asistencia en BUFFER (instantáneo)
                                 resultado = guardar_asistencia_buffer(
-                                    curso_id=curso['curso_id'],
+                                    curso_id=curso_id,
                                     rut=rut_input,
-                                    sesion=curso['sesion_hoy']
+                                    sesion=sesion_hoy
                                 )
-
                                 if resultado['success']:
                                     nombre_completo = f"{datos.get('nombres', '')} {datos.get('apellido_paterno', '')}".strip() or rut_input
                                     st.success(f"✅ ¡Asistencia registrada para {nombre_completo}!")
+                                    st.info("🎉 Ya puedes cerrar esta pestaña.")
                                     st.balloons()
                                 else:
                                     st.warning(f"ℹ️ {resultado['message']}")
+
+        for _, curso in df_cursos_hoy.iterrows():
+            formulario_asistencia(
+                curso_id=curso['curso_id'],
+                sesion_hoy=curso['sesion_hoy'],
+                region=curso.get('region', 'N/A'),
+                fecha_str=curso['fecha_sesion_hoy'].strftime('%d-%m-%Y')
+            )
 
         st.stop()
 

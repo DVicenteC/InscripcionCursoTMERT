@@ -440,19 +440,21 @@ class AsistenciaBuffer:
             int: Número de registros eliminados
         """
         if dias <= 0:
-            # dias=0 → borrar todos los sincronizados sin filtro de tiempo
-            result = self.conn.execute("""
-                DELETE FROM asistencias_buffer
-                WHERE sincronizado = true
-            """)
+            count = self.conn.execute("SELECT COUNT(*) FROM asistencias_buffer WHERE sincronizado = true").fetchone()[0]
+            self.conn.execute("DELETE FROM asistencias_buffer WHERE sincronizado = true")
         else:
-            result = self.conn.execute("""
+            count = self.conn.execute("""
+                SELECT COUNT(*) FROM asistencias_buffer
+                WHERE sincronizado = true
+                  AND created_at < CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (? * INTERVAL '1 day')
+            """, [dias]).fetchone()[0]
+            self.conn.execute("""
                 DELETE FROM asistencias_buffer
                 WHERE sincronizado = true
                   AND created_at < CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (? * INTERVAL '1 day')
             """, [dias])
 
-        return result.rowcount
+        return count
 
     def close(self):
         """Cierra conexión y detiene sincronización automática."""
