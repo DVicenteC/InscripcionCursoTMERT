@@ -24,6 +24,8 @@ import requests
 from datetime import datetime, date
 from rut_chile import rut_chile
 import io
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 # Importar el sistema de buffer
 from db_buffer import get_buffer
@@ -202,6 +204,171 @@ def validar_participante_inscrito(rut, curso_id, df_registros):
     else:
         return False, None
 
+# ==================== GENERACIÓN DE REPORTES EXCEL ====================
+
+def _split_rut(rut_str):
+    """Separa RUT en cuerpo y dígito verificador."""
+    partes = str(rut_str).strip().upper().split('-')
+    if len(partes) == 2:
+        return partes[0].replace('.', ''), partes[1]
+    return rut_str, ''
+
+def _sexo_a_codigo(sexo):
+    """Convierte HOMBRE/MUJER al código numérico MK."""
+    return 1 if str(sexo).upper() == 'HOMBRE' else 2
+
+def _nacionalidad_a_codigo(nac):
+    """Convierte nacionalidad al código numérico MK."""
+    return 1 if str(nac).upper() == 'CHILENO' else 2
+
+_ROL_CODIGO_MK = {
+    'PROFESIONAL SST': 1,
+    'TRABAJADOR': 2,
+    'MIEMBRO DE COMITÉ PARITARIO': 3,
+    'MIEMBRO COMITE PARITARIO': 3,
+    'MONITOR O DELEGADO': 4,
+    'DIRIGENTE SINDICAL': 5,
+}
+
+def generar_excel_ist(df):
+    """
+    Genera Excel formato MASTER CARGAS EMPRESAS IST EDUCA.
+    df debe tener columnas de inscripción (registros joined con asistencias).
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Campos inscripción ISTeduca"
+
+    headers = [
+        "RUT trabajador (Sin puntos ni dv)", "DV", "Nombres", "Apellidos (ambos)",
+        "Email (individual)", "Género", "Rol trabajador", "Región", "Comuna",
+        "Rut empresa (Sin puntos, con guión)", "Razón social"
+    ]
+
+    header_fill = PatternFill("solid", fgColor="1F4E79")
+    header_font = Font(name="Arial", bold=True, color="FFFFFF", size=10)
+    thin = Side(style='thin', color="AAAAAA")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", wrap_text=True)
+        cell.border = border
+        ws.row_dimensions[1].height = 30
+
+    widths = [22, 6, 25, 30, 30, 10, 25, 30, 25, 28, 35]
+    for col, w in enumerate(widths, 1):
+        ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = w
+
+    data_font = Font(name="Arial", size=10)
+    for row_idx, row in enumerate(df.itertuples(index=False), 2):
+        rut_body, rut_dv = _split_rut(getattr(row, 'rut', ''))
+        apellidos = f"{getattr(row, 'apellido_paterno', '')} {getattr(row, 'apellido_materno', '')}".strip()
+        valores = [
+            rut_body,
+            rut_dv,
+            getattr(row, 'nombres', ''),
+            apellidos,
+            getattr(row, 'email', ''),
+            getattr(row, 'sexo', ''),
+            getattr(row, 'rol', ''),
+            getattr(row, 'region', ''),
+            getattr(row, 'comuna', ''),
+            getattr(row, 'rut_empresa', ''),
+            getattr(row, 'razon_social', ''),
+        ]
+        for col, val in enumerate(valores, 1):
+            cell = ws.cell(row=row_idx, column=col, value=val)
+            cell.font = data_font
+            cell.border = border
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+def generar_excel_mk(df):
+    """
+    Genera Excel formato Plantilla Carga Trabajadores MK Capacitaciones.
+    Incluye hoja Datos + hojas de referencia (MaeSexo, MaeNacionalidad, MaeRolTrabajador).
+    """
+    wb = Workbook()
+
+    # Hoja Datos
+    ws = wb.active
+    ws.title = "Datos"
+
+    headers = ["Rut", "Nombres", "Apellido Paterno", "Apellido Materno",
+               "Sexo", "Nacionalidad", "Rol Trabajador", "Otro Rol"]
+
+    header_fill = PatternFill("solid", fgColor="2E75B6")
+    header_font = Font(name="Arial", bold=True, color="FFFFFF", size=10)
+    thin = Side(style='thin', color="AAAAAA")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+        cell.border = border
+
+    widths = [18, 25, 25, 25, 8, 14, 16, 25]
+    for col, w in enumerate(widths, 1):
+        ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = w
+
+    data_font = Font(name="Arial", size=10)
+    for row_idx, row in enumerate(df.itertuples(index=False), 2):
+        rol_str = str(getattr(row, 'rol', '')).upper()
+        rol_codigo = _ROL_CODIGO_MK.get(rol_str, 2)
+        otro_rol = rol_str if rol_str not in _ROL_CODIGO_MK else ''
+        valores = [
+            getattr(row, 'rut', ''),
+            getattr(row, 'nombres', ''),
+            getattr(row, 'apellido_paterno', ''),
+            getattr(row, 'apellido_materno', ''),
+            _sexo_a_codigo(getattr(row, 'sexo', '')),
+            _nacionalidad_a_codigo(getattr(row, 'nacionalidad', '')),
+            rol_codigo,
+            otro_rol,
+        ]
+        for col, val in enumerate(valores, 1):
+            cell = ws.cell(row=row_idx, column=col, value=val)
+            cell.font = data_font
+            cell.border = border
+
+    # Hoja Parametros
+    wp = wb.create_sheet("Parametros")
+    for r in [("Descripcion", "Valor"), ("Largo máximo Rut", 15),
+              ("Largo máximo nombres", 50), ("Largo máximo apellido paterno", 50),
+              ("Largo máximo apellido materno", 50)]:
+        wp.append(r)
+
+    # Hoja MaeSexo
+    ws2 = wb.create_sheet("MaeSexo")
+    for r in [("Codigo", "Valor"), (1, "Hombre"), (2, "Mujer")]:
+        ws2.append(r)
+
+    # Hoja MaeNacionalidad
+    wn = wb.create_sheet("MaeNacionalidad")
+    for r in [("Codigo", "Valor"), (1, "Chileno"), (2, "Extranjero")]:
+        wn.append(r)
+
+    # Hoja MaeRolTrabajador
+    wr = wb.create_sheet("MaeRolTrabajador")
+    for r in [("Codigo", "Valor"), (1, "Profesional SST"), (2, "Trabajador"),
+              (3, "Miembro Comité Paritario"), (4, "Monitor o Delegado"), (5, "Dirigente Sindical")]:
+        wr.append(r)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
 # ==================== INTERFAZ PRINCIPAL ====================
 
 def main():
@@ -325,7 +492,7 @@ def main():
 
     if admin_mode:
         # Tabs para diferentes funciones
-        tab1, tab2, tab3 = st.tabs(["📝 Gestionar Asistencia", "📊 Ver Asistencias", "🔧 Mantenimiento"])
+        tab1, tab2, tab3, tab4 = st.tabs(["📝 Gestionar Asistencia", "📊 Ver Asistencias", "🔧 Mantenimiento", "📥 Descargar Reportes"])
 
         # TAB 1: Gestionar Asistencia Manual
         with tab1:
@@ -437,6 +604,63 @@ def main():
                     )
                 else:
                     st.info("ℹ️ No hay asistencias registradas para este curso y sesión")
+
+        # TAB 4: Descargar Reportes
+        with tab4:
+            st.subheader("📥 Descargar Reportes de Asistencia")
+
+            df_cursos = get_config_data()
+
+            if df_cursos.empty:
+                st.warning("⚠️ No hay cursos disponibles")
+            else:
+                curso_rep = st.selectbox("Curso", df_cursos['curso_id'].tolist(), key="rep_curso")
+                sesion_rep = st.selectbox("Sesión", [1, 2, 3], key="rep_sesion")
+
+                # Obtener asistencias del buffer
+                df_asist = get_asistencias_from_buffer(curso_rep, sesion_rep)
+
+                if df_asist.empty:
+                    st.info("ℹ️ No hay asistencias registradas para este curso y sesión.")
+                else:
+                    # Join con registros de inscripción
+                    df_registros = get_registros_data()
+                    ruts_asistentes = df_asist['rut'].str.upper().str.strip().unique()
+
+                    if df_registros.empty:
+                        st.warning("⚠️ No se pudieron obtener los datos de inscripción.")
+                    else:
+                        df_reg_curso = df_registros[df_registros['curso_id'] == curso_rep].copy()
+                        df_reg_curso['rut_norm'] = df_reg_curso['rut'].astype(str).str.upper().str.strip()
+                        df_asistentes = df_reg_curso[df_reg_curso['rut_norm'].isin(ruts_asistentes)].copy()
+
+                        st.success(f"✅ **{len(df_asistentes)} asistentes** encontrados para {curso_rep} - Sesión {sesion_rep}")
+                        st.dataframe(
+                            df_asistentes[['rut', 'nombres', 'apellido_paterno', 'apellido_materno', 'sexo', 'rol', 'region']],
+                            use_container_width=True
+                        )
+
+                        col1, col2 = st.columns(2)
+
+                        with col1:
+                            st.markdown("**Formato IST Educa**")
+                            buf_ist = generar_excel_ist(df_asistentes)
+                            st.download_button(
+                                label="📥 Descargar IST Educa (.xlsx)",
+                                data=buf_ist,
+                                file_name=f"asistencia_IST_{curso_rep}_sesion{sesion_rep}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            )
+
+                        with col2:
+                            st.markdown("**Formato MK Capacitaciones**")
+                            buf_mk = generar_excel_mk(df_asistentes)
+                            st.download_button(
+                                label="📥 Descargar MK Capacitaciones (.xlsx)",
+                                data=buf_mk,
+                                file_name=f"asistencia_MK_{curso_rep}_sesion{sesion_rep}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            )
 
         # TAB 3: Mantenimiento
         with tab3:
