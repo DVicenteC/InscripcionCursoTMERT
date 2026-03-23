@@ -16,7 +16,15 @@
       "Bash(git rm:*)",
       "Bash(git push:*)",
       "Bash(git remote add:*)",
-      "Bash(git pull:*)"
+      "Bash(git pull:*)",
+      "Bash(\"/c/ProgramData/miniconda3/envs/dash/python.exe\" -m py_compile AsistenciaCurso.py db_buffer.py)",
+      "Bash(\"/c/ProgramData/miniconda3/envs/dash/python.exe\" -m py_compile \"/c/EspecialidadesTecnicas/Pytest/InscripcionCursoTMERT/InscripcionCSV.py\")",
+      "Bash(\"/c/ProgramData/miniconda3/envs/dash/python.exe\" -m py_compile \"/c/EspecialidadesTecnicas/Pytest/ProtocoloEvaluacionRuido/Inscripcion.py\")",
+      "Bash(pip show:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:pypi.org)",
+      "Bash(\"/c/ProgramData/miniconda3/envs/dash/python.exe\" -m py_compile InscripcionCSV.py)",
+      "Bash(\"/c/ProgramData/miniconda3/envs/dash/python.exe\" -m py_compile Inscripcion.py)"
     ]
   }
 }
