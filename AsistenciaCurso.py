@@ -77,7 +77,12 @@ def get_registros_data():
         data = response.json()
 
         if data['success']:
-            return pd.DataFrame(data['registros'])
+            df = pd.DataFrame(data['registros'])
+            # Si la API devolvió datos pero sin columnas esperadas, tratar como vacío
+            if not df.empty and 'rut' not in df.columns:
+                st.warning("⚠️ La API devolvió registros sin estructura esperada.")
+                return pd.DataFrame()
+            return df
         else:
             st.error(f"Error al obtener registros: {data.get('error', 'Error desconocido')}")
             return pd.DataFrame()
@@ -607,8 +612,7 @@ def main():
 
                     # Enriquecer con nombre + apellido desde registros
                     df_reg_ver = get_registros_data()
-                    if not df_reg_ver.empty:
-                        df_reg_ver['rut_norm'] = df_reg_ver['rut'].astype(str).str.upper().str.strip()
+                    if not df_reg_ver.empty and 'rut' in df_reg_ver.columns:
                         df_asist['rut_norm'] = df_asist['rut'].astype(str).str.upper().str.strip()
                         df_asist = df_asist.merge(
                             df_reg_ver[['rut_norm', 'nombres', 'apellido_paterno']],
