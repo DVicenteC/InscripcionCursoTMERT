@@ -525,7 +525,7 @@ def main():
                     df_asist_actual = get_asistencias_from_buffer(curso_seleccionado, sesion_seleccionada if sesiones else 1)
                     if not df_asist_actual.empty:
                         df_reg_all = get_registros_data()
-                        if not df_reg_all.empty:
+                        if not df_reg_all.empty and 'curso_id' in df_reg_all.columns:
                             df_reg_c = df_reg_all[df_reg_all['curso_id'] == curso_seleccionado].copy()
                             df_reg_c['rut_norm'] = df_reg_c['rut'].astype(str).str.upper().str.strip()
                             ruts_asist = df_asist_actual['rut'].str.upper().str.strip()
@@ -655,7 +655,7 @@ def main():
                     df_registros = get_registros_data()
                     ruts_asistentes = df_asist['rut'].str.upper().str.strip().unique()
 
-                    if df_registros.empty:
+                    if df_registros.empty or 'curso_id' not in df_registros.columns:
                         st.warning("⚠️ No se pudieron obtener los datos de inscripción.")
                     else:
                         df_reg_curso = df_registros[df_registros['curso_id'] == curso_rep].copy()
