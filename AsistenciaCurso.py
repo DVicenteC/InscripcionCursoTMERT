@@ -612,7 +612,9 @@ def main():
 
                     # Enriquecer con nombre + apellido desde registros
                     df_reg_ver = get_registros_data()
-                    if not df_reg_ver.empty and 'rut' in df_reg_ver.columns:
+                    if not df_reg_ver.empty and 'rut' in df_reg_ver.columns and \
+                       'nombres' in df_reg_ver.columns and 'apellido_paterno' in df_reg_ver.columns:
+                        df_reg_ver['rut_norm'] = df_reg_ver['rut'].astype(str).str.upper().str.strip()
                         df_asist['rut_norm'] = df_asist['rut'].astype(str).str.upper().str.strip()
                         df_asist = df_asist.merge(
                             df_reg_ver[['rut_norm', 'nombres', 'apellido_paterno']],
