@@ -6,6 +6,9 @@ import requests
 from datetime import datetime
 from rut_chile import rut_chile
 import io
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 # Configuración básica
 st.set_page_config(page_title="Inscripción de Participantes", layout="wide")
@@ -15,6 +18,8 @@ COMUNAS_REGIONES_PATH = "comunas-regiones.json"
 SECRET_PASSWORD = st.secrets["SECRET_PASSWORD"]
 API_URL = st.secrets["API_URL"]  # URL del Apps Script publicado como aplicación web
 API_KEY = st.secrets["API_KEY"]  # Clave API configurada en el Apps Script
+SMTP_USER = st.secrets.get("SMTP_USER", "")
+SMTP_PASSWORD = st.secrets.get("SMTP_PASSWORD", "")
 
 # Listas para formulario
 ROLES = ["TRABAJADOR", "PROFESIONAL SST", "MIEMBRO DE COMITÉ PARITARIO", 
@@ -28,6 +33,54 @@ with open(COMUNAS_REGIONES_PATH, "r", encoding='utf-8') as file:
 
 # Obtener lista de regiones
 regiones = [region["region"] for region in comunas_regiones["regiones"]]
+
+def enviar_confirmacion(destinatario, nombres, apellido_paterno, rut, curso_id, region, fecha_inicio):
+    """Envía correo de confirmación de inscripción al participante."""
+    if not SMTP_USER or not SMTP_PASSWORD:
+        return  # Sin credenciales configuradas, no enviar
+
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"✅ Confirmación de inscripción — {curso_id}"
+        msg["From"] = SMTP_USER
+        msg["To"] = destinatario
+
+        html = f"""
+        <html><body style="font-family:Arial,sans-serif;color:#333;max-width:600px;margin:auto">
+          <div style="background:#1F4E79;padding:20px;text-align:center">
+            <h2 style="color:white;margin:0">Inscripción Confirmada</h2>
+            <p style="color:#cce4ff;margin:5px 0">Protocolo VOTME — IST</p>
+          </div>
+          <div style="padding:30px">
+            <p>Estimado/a <strong>{nombres} {apellido_paterno}</strong>,</p>
+            <p>Tu inscripción ha sido registrada exitosamente. A continuación los datos:</p>
+            <table style="border-collapse:collapse;width:100%">
+              <tr><td style="padding:8px;background:#f0f4f8;width:40%"><strong>RUT</strong></td>
+                  <td style="padding:8px;background:#f0f4f8">{rut}</td></tr>
+              <tr><td style="padding:8px"><strong>Curso</strong></td>
+                  <td style="padding:8px">{curso_id}</td></tr>
+              <tr><td style="padding:8px;background:#f0f4f8"><strong>Región</strong></td>
+                  <td style="padding:8px;background:#f0f4f8">{region}</td></tr>
+              <tr><td style="padding:8px"><strong>Fecha inicio</strong></td>
+                  <td style="padding:8px">{fecha_inicio}</td></tr>
+            </table>
+            <p style="margin-top:20px">Si tienes dudas, responde este correo o contacta a tu ejecutivo IST.</p>
+          </div>
+          <div style="background:#f0f4f8;padding:15px;text-align:center;font-size:12px;color:#666">
+            Instituto de Seguridad del Trabajo (IST)
+          </div>
+        </body></html>
+        """
+
+        msg.attach(MIMEText(html, "html"))
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as server:
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_USER, destinatario, msg.as_string())
+
+    except Exception:
+        pass  # El correo es opcional — no interrumpe la inscripción
+
 
 # Función para obtener datos de configuración desde la API
 @st.cache_data(ttl=300)  # Cache por 5 minutos
@@ -637,9 +690,18 @@ try:
                         
                         # Guardar registro
                         if guardar_registro(nuevo_registro):
-                            st.write("Enviando registro:", nuevo_registro)
                             st.success("✅ Registro guardado exitosamente")
                             st.balloons()
+                            # Enviar correo de confirmación (silencioso si falla)
+                            enviar_confirmacion(
+                                destinatario=email,
+                                nombres=nombres,
+                                apellido_paterno=apellido_paterno,
+                                rut=rut_limpio,
+                                curso_id=curso_actual['curso_id'],
+                                region=region,
+                                fecha_inicio=str(curso_actual.get('fecha_inicio', ''))
+                            )
                             time.sleep(2)
                             st.rerun()
 

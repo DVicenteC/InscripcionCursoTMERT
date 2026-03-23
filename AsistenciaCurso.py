@@ -372,7 +372,7 @@ def generar_excel_mk(df):
 # ==================== INTERFAZ PRINCIPAL ====================
 
 def main():
-    st.title("📋 Sistema de Registro de Asistencia (Con Buffer)")
+    st.title("📋 Sistema de Registro de Asistencia")
 
     # Obtener instancia del buffer
     buffer = get_buffer()
@@ -492,7 +492,7 @@ def main():
 
     if admin_mode:
         # Tabs para diferentes funciones
-        tab1, tab2, tab3, tab4 = st.tabs(["📝 Gestionar Asistencia", "📊 Ver Asistencias", "🔧 Mantenimiento", "📥 Descargar Reportes"])
+        tab1, tab2, tab3, tab4 = st.tabs(["📝 Gestionar Asistencia", "📊 Ver Asistencias", "📥 Descargar Reportes", "🔧 Mantenimiento"])
 
         # TAB 1: Gestionar Asistencia Manual
         with tab1:
@@ -521,6 +521,25 @@ def main():
                 else:
                     sesion_seleccionada = st.selectbox("Selecciona sesión", sesiones)
 
+                    # Asistentes actuales con nombre + RUT
+                    df_asist_actual = get_asistencias_from_buffer(curso_seleccionado, sesion_seleccionada if sesiones else 1)
+                    if not df_asist_actual.empty:
+                        df_reg_all = get_registros_data()
+                        if not df_reg_all.empty:
+                            df_reg_c = df_reg_all[df_reg_all['curso_id'] == curso_seleccionado].copy()
+                            df_reg_c['rut_norm'] = df_reg_c['rut'].astype(str).str.upper().str.strip()
+                            ruts_asist = df_asist_actual['rut'].str.upper().str.strip()
+                            df_reg_c['asistió'] = df_reg_c['rut_norm'].isin(ruts_asist)
+                            df_mostrar = df_reg_c[df_reg_c['asistió']][['rut', 'nombres', 'apellido_paterno']].copy()
+                            df_mostrar.columns = ['RUT', 'Nombres', 'Apellido Paterno']
+                            st.write(f"**Asistentes registrados: {len(df_mostrar)}**")
+                            st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
+                        else:
+                            st.write(f"**Asistentes: {len(df_asist_actual)}**")
+                            st.dataframe(df_asist_actual[['rut', 'estado']], use_container_width=True, hide_index=True)
+
+                    st.divider()
+
                     # Formulario de registro
                     with st.form("form_admin"):
                         col1, col2 = st.columns(2)
@@ -537,7 +556,6 @@ def main():
                             if not rut_chile.is_valid_rut(rut):
                                 st.error("❌ RUT inválido")
                             else:
-                                # Verificar inscripción
                                 df_registros = get_registros_data()
                                 esta_inscrito, datos = validar_participante_inscrito(
                                     rut, curso_seleccionado, df_registros
@@ -546,7 +564,6 @@ def main():
                                 if not esta_inscrito:
                                     st.error("❌ Participante no inscrito en este curso")
                                 else:
-                                    # Marcar en buffer
                                     resultado = buffer.marcar_asistencia(
                                         curso_id=curso_seleccionado,
                                         rut=rut,
@@ -556,7 +573,8 @@ def main():
                                     )
 
                                     if resultado['success']:
-                                        st.success(f"✅ Asistencia registrada para {datos['nombre']}")
+                                        nombre_completo = f"{datos.get('nombres', '')} {datos.get('apellido_paterno', '')}".strip() or datos.get('nombre', rut)
+                                        st.success(f"✅ Asistencia registrada — {nombre_completo} ({rut})")
                                     else:
                                         st.error(f"❌ {resultado['message']}")
 
@@ -578,7 +596,6 @@ def main():
                 if not df_asist.empty:
                     st.write(f"**Total registros:** {len(df_asist)}")
 
-                    # Mostrar estado de sincronización
                     sincronizadas = df_asist['sincronizado'].sum()
                     pendientes = len(df_asist) - sincronizadas
 
@@ -588,11 +605,22 @@ def main():
                     with col2:
                         st.metric("⏳ Pendientes", pendientes)
 
-                    # Mostrar tabla
-                    st.dataframe(
-                        df_asist[['rut', 'estado', 'fecha_registro', 'sincronizado', 'intentos_sync']],
-                        use_container_width=True
-                    )
+                    # Enriquecer con nombre + apellido desde registros
+                    df_reg_ver = get_registros_data()
+                    if not df_reg_ver.empty:
+                        df_reg_ver['rut_norm'] = df_reg_ver['rut'].astype(str).str.upper().str.strip()
+                        df_asist['rut_norm'] = df_asist['rut'].astype(str).str.upper().str.strip()
+                        df_asist = df_asist.merge(
+                            df_reg_ver[['rut_norm', 'nombres', 'apellido_paterno']],
+                            on='rut_norm', how='left'
+                        )
+
+                    cols_mostrar = ['rut']
+                    if 'nombres' in df_asist.columns:
+                        cols_mostrar += ['nombres', 'apellido_paterno']
+                    cols_mostrar += ['estado', 'fecha_registro', 'sincronizado']
+
+                    st.dataframe(df_asist[cols_mostrar], use_container_width=True, hide_index=True)
 
                     # Botón para exportar
                     csv = df_asist.to_csv(index=False).encode('utf-8')
@@ -605,8 +633,8 @@ def main():
                 else:
                     st.info("ℹ️ No hay asistencias registradas para este curso y sesión")
 
-        # TAB 4: Descargar Reportes
-        with tab4:
+        # TAB 3: Descargar Reportes
+        with tab3:
             st.subheader("📥 Descargar Reportes de Asistencia")
 
             df_cursos = get_config_data()
@@ -662,8 +690,8 @@ def main():
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                             )
 
-        # TAB 3: Mantenimiento
-        with tab3:
+        # TAB 4: Mantenimiento
+        with tab4:
             st.subheader("🔧 Mantenimiento del Sistema")
 
             st.write("### Sincronización Manual")
