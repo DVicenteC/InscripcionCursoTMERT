@@ -545,38 +545,7 @@ def main():
 
                     # ---- Descargar Reportes ----
                     st.divider()
-                    st.subheader("📥 Descargar Reportes")
-                    df_registros_rep = get_registros_data()
-                    if not df_registros_rep.empty and 'curso_id' in df_registros_rep.columns:
-                        df_asist_rep = get_asistencias_from_buffer(curso_seleccionado, sesion_seleccionada)
-                        ruts_rep = df_asist_rep['rut'].str.upper().str.strip().unique() if not df_asist_rep.empty else []
-                        df_reg_rep = df_registros_rep[df_registros_rep['curso_id'] == curso_seleccionado].copy()
-                        df_reg_rep['rut_norm'] = df_reg_rep['rut'].astype(str).str.upper().str.strip()
-                        df_asistentes_rep = df_reg_rep[df_reg_rep['rut_norm'].isin(ruts_rep)].copy()
-
-                        if df_asistentes_rep.empty:
-                            st.info("ℹ️ No hay asistentes registrados para generar reportes.")
-                        else:
-                            col_r1, col_r2 = st.columns(2)
-                            with col_r1:
-                                st.markdown("**Formato IST Educa**")
-                                st.download_button(
-                                    label="📥 Descargar IST Educa (.xlsx)",
-                                    data=generar_excel_ist(df_asistentes_rep),
-                                    file_name=f"IST_{curso_seleccionado}_s{sesion_seleccionada}.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                )
-                            with col_r2:
-                                st.markdown("**Formato MK Capacitaciones**")
-                                st.download_button(
-                                    label="📥 Descargar MK Capacitaciones (.xlsx)",
-                                    data=generar_excel_mk(df_asistentes_rep),
-                                    file_name=f"MK_{curso_seleccionado}_s{sesion_seleccionada}.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                )
-                    st.divider()
-
-                    # Formulario de registro
+                     # Formulario de registro
                     with st.form("form_admin"):
                         col1, col2 = st.columns(2)
 
@@ -613,6 +582,36 @@ def main():
                                         st.success(f"✅ Asistencia registrada — {nombre_completo} ({rut})")
                                     else:
                                         st.error(f"❌ {resultado['message']}")
+                    st.divider()
+                    st.subheader("📥 Descargar Reportes")
+                    df_registros_rep = get_registros_data()
+                    if not df_registros_rep.empty and 'curso_id' in df_registros_rep.columns:
+                        df_asist_rep = get_asistencias_from_buffer(curso_seleccionado, sesion_seleccionada)
+                        ruts_rep = df_asist_rep['rut'].str.upper().str.strip().unique() if not df_asist_rep.empty else []
+                        df_reg_rep = df_registros_rep[df_registros_rep['curso_id'] == curso_seleccionado].copy()
+                        df_reg_rep['rut_norm'] = df_reg_rep['rut'].astype(str).str.upper().str.strip()
+                        df_asistentes_rep = df_reg_rep[df_reg_rep['rut_norm'].isin(ruts_rep)].copy()
+
+                        if df_asistentes_rep.empty:
+                            st.info("ℹ️ No hay asistentes registrados para generar reportes.")
+                        else:
+                            col_r1, col_r2 = st.columns(2)
+                            with col_r1:
+                                st.markdown("**Formato IST Educa**")
+                                st.download_button(
+                                    label="📥 Descargar IST Educa (.xlsx)",
+                                    data=generar_excel_ist(df_asistentes_rep),
+                                    file_name=f"IST_{curso_seleccionado}_s{sesion_seleccionada}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                )
+                            with col_r2:
+                                st.markdown("**Formato MK Capacitaciones**")
+                                st.download_button(
+                                    label="📥 Descargar MK Capacitaciones (.xlsx)",
+                                    data=generar_excel_mk(df_asistentes_rep),
+                                    file_name=f"MK_{curso_seleccionado}_s{sesion_seleccionada}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                )              
 
         # TAB 2: Mantenimiento
         with tab2:
