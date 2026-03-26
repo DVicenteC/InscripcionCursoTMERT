@@ -26,6 +26,7 @@ ROLES = ["TRABAJADOR", "PROFESIONAL SST", "MIEMBRO DE COMITÉ PARITARIO",
          "MONITOR O DELEGADO", "DIRIGENTE SINDICAL", "EMPLEADOR", 
          "TRABAJADOR DEL OA", "OTROS"]
 SEXO =['MUJER','HOMBRE']
+NACIONALIDAD = ['CHILENO', 'EXTRANJERO']
 
 # Cargar archivo JSON de comunas y regiones
 with open(COMUNAS_REGIONES_PATH, "r", encoding='utf-8') as file:
@@ -611,7 +612,7 @@ try:
                 with col2:
                     sexo = st.selectbox("Sexo (*)", SEXO).upper()
                     apellido_materno = st.text_input("Apellido Materno (*)").upper()
-                    nacionalidad = st.text_input("Nacionalidad (*)").upper()
+                    nacionalidad = st.selectbox("Nacionalidad (*)", NACIONALIDAD).upper()
                     rol = st.selectbox("Rol (*)", ROLES).upper()
                 
                 col3, col4 = st.columns(2)
