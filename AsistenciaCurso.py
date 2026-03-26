@@ -328,16 +328,15 @@ def generar_excel_mk(df):
     data_font = Font(name="Arial", size=10)
     for row_idx, row in enumerate(df.itertuples(index=False), 2):
         rol_str = str(getattr(row, 'rol', '')).upper()
-        rol_codigo = _ROL_CODIGO_MK.get(rol_str, 2)
         otro_rol = rol_str if rol_str not in _ROL_CODIGO_MK else ''
         valores = [
             getattr(row, 'rut', ''),
             getattr(row, 'nombres', ''),
             getattr(row, 'apellido_paterno', ''),
             getattr(row, 'apellido_materno', ''),
-            _sexo_a_codigo(getattr(row, 'sexo', '')),
-            _nacionalidad_a_codigo(getattr(row, 'nacionalidad', '')),
-            rol_codigo,
+            str(getattr(row, 'sexo', '')).capitalize(),
+            str(getattr(row, 'nacionalidad', '')).capitalize(),
+            rol_str.capitalize(),
             otro_rol,
         ]
         for col, val in enumerate(valores, 1):
