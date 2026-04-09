@@ -392,6 +392,13 @@ def main():
     if admin_mode:
         st.sidebar.success("✅ Acceso administrativo concedido")
 
+        # Recargar asistencias desde Sheets al iniciar sesión admin (solo una vez por sesión)
+        if not st.session_state.get("admin_hydrated"):
+            with st.spinner("🔄 Cargando asistencias desde Google Sheets..."):
+                n = buffer.force_hydrate()
+            st.session_state["admin_hydrated"] = True
+            st.sidebar.info(f"✅ {n} asistencias cargadas desde Sheets")
+
         # Mostrar estadísticas del buffer
         st.sidebar.subheader("📊 Estado del Buffer")
         stats = buffer.get_estadisticas()

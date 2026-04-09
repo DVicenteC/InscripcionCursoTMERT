@@ -335,6 +335,17 @@ class AsistenciaBuffer:
         except Exception:
             return 0  # Si falla la hidratación, el buffer sigue funcionando normal
 
+    def force_hydrate(self):
+        """
+        Elimina registros sincronizados del buffer y recarga todo desde Google Sheets.
+        Llamar cuando el admin inicia sesión para garantizar datos actualizados.
+
+        Returns:
+            int: Número de registros cargados
+        """
+        self.conn.execute("DELETE FROM asistencias_buffer WHERE sincronizado = true")
+        return self.hydrate_from_sheets()
+
     def _start_auto_sync(self):
         """Inicia thread de sincronización automática."""
         def sync_loop():
