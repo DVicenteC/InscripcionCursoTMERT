@@ -69,6 +69,25 @@ def get_config_data():
         st.error(f"Error al conectar con la API: {str(e)}")
         return pd.DataFrame()
 
+# Función para obtener asistencias directamente desde Google Sheets (para descargas)
+@st.cache_data(ttl=60)
+def get_asistencias_desde_sheets(curso_id=None, sesion=None):
+    try:
+        response = requests.get(f"{API_URL}?action=getAsistencias&key={API_KEY}", timeout=15)
+        data = response.json()
+        if data.get('success') and data.get('asistencias'):
+            df = pd.DataFrame(data['asistencias'])
+            if df.empty:
+                return pd.DataFrame()
+            if curso_id:
+                df = df[df['curso_id'].astype(str) == str(curso_id)]
+            if sesion is not None:
+                df = df[df['sesion'].astype(str) == str(sesion)]
+            return df
+        return pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
+
 # Función para obtener registros de inscripción
 @st.cache_data(ttl=180)  # Cache por 3 minutos
 def get_registros_data():
@@ -592,8 +611,8 @@ def main():
                     st.subheader("📥 Descargar Reportes")
                     df_registros_rep = get_registros_data()
                     if not df_registros_rep.empty and 'curso_id' in df_registros_rep.columns:
-                        df_asist_rep = get_asistencias_from_buffer(curso_seleccionado, sesion_seleccionada)
-                        ruts_rep = df_asist_rep['rut'].str.upper().str.strip().unique() if not df_asist_rep.empty else []
+                        df_asist_rep = get_asistencias_desde_sheets(curso_seleccionado, sesion_seleccionada)
+                        ruts_rep = df_asist_rep['rut'].astype(str).str.upper().str.strip().unique() if not df_asist_rep.empty else []
                         df_reg_rep = df_registros_rep[df_registros_rep['curso_id'] == curso_seleccionado].copy()
                         df_reg_rep['rut_norm'] = df_reg_rep['rut'].astype(str).str.upper().str.strip()
                         df_asistentes_rep = df_reg_rep[df_reg_rep['rut_norm'].isin(ruts_rep)].copy()
