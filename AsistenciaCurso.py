@@ -194,7 +194,6 @@ def get_cursos_con_sesion_hoy(df_cursos):
                     curso_dict['sesion_hoy'] = sesion_num
                     curso_dict['fecha_sesion_hoy'] = curso[fecha_col]
                     cursos_hoy.append(curso_dict)
-                    break  # Solo tomar la primera sesión del día
 
     if cursos_hoy:
         return pd.DataFrame(cursos_hoy)
