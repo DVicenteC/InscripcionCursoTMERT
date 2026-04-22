@@ -104,7 +104,15 @@ def get_config_data():
                 if 'num_sesiones' in df.columns:
                     df['num_sesiones'] = pd.to_numeric(df['num_sesiones'], errors='coerce').fillna(3).astype(int)
                 else:
-                    df['num_sesiones'] = 3
+                    # Auto-detectar num_sesiones contando columnas fecha_sesion_N no nulas
+                    def _count_sesiones(row):
+                        count = 0
+                        for i in range(1, 5):
+                            col = f'fecha_sesion_{i}'
+                            if col in row.index and pd.notna(row[col]) and row[col] != '':
+                                count = i
+                        return max(count, 3)
+                    df['num_sesiones'] = df.apply(_count_sesiones, axis=1).astype(int)
             return df
         else:
             st.error(f"Error al obtener configuración: {data.get('error', 'Error desconocido')}")
