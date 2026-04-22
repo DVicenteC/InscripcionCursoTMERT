@@ -94,14 +94,17 @@ def get_config_data():
             df = pd.DataFrame(data['cursos'])
             if not df.empty:
                 # Convertir columnas de fecha a datetime (probando múltiples formatos)
-                date_cols = ['fecha_inicio', 'fecha_fin', 'fecha_sesion_1', 'fecha_sesion_2', 'fecha_sesion_3']
+                date_cols = ['fecha_inicio', 'fecha_fin', 'fecha_sesion_1', 'fecha_sesion_2', 'fecha_sesion_3', 'fecha_sesion_4']
                 for col in date_cols:
                     if col in df.columns:
-                        # Intentar parsear sin formato específico (pandas detecta automáticamente)
                         df[col] = pd.to_datetime(df[col], errors='coerce')
 
                 if 'cupo_maximo' in df.columns:
                     df['cupo_maximo'] = pd.to_numeric(df['cupo_maximo'], errors='coerce')
+                if 'num_sesiones' in df.columns:
+                    df['num_sesiones'] = pd.to_numeric(df['num_sesiones'], errors='coerce').fillna(3).astype(int)
+                else:
+                    df['num_sesiones'] = 3
             return df
         else:
             st.error(f"Error al obtener configuración: {data.get('error', 'Error desconocido')}")
@@ -550,13 +553,14 @@ try:
             # Mostrar fechas de sesiones si están disponibles
             if 'fecha_sesion_1' in curso_actual:
                 st.write("**Fechas de Sesiones:**")
-                col_s1, col_s2, col_s3 = st.columns(3)
-                with col_s1:
-                    st.write(f"📅 Sesión 1: {formato_fecha_dd_mm_yyyy(curso_actual['fecha_sesion_1'])}")
-                with col_s2:
-                    st.write(f"📅 Sesión 2: {formato_fecha_dd_mm_yyyy(curso_actual['fecha_sesion_2'])}")
-                with col_s3:
-                    st.write(f"📅 Sesión 3: {formato_fecha_dd_mm_yyyy(curso_actual['fecha_sesion_3'])}")
+                num_ses = int(curso_actual.get('num_sesiones', 3))
+                cols = st.columns(min(num_ses, 3))
+                for i in range(1, num_ses + 1):
+                    col_idx = (i - 1) % 3
+                    fecha_col = f'fecha_sesion_{i}'
+                    if fecha_col in curso_actual and pd.notna(curso_actual[fecha_col]):
+                        with cols[col_idx]:
+                            st.write(f"📅 Sesión {i}: {formato_fecha_dd_mm_yyyy(curso_actual[fecha_col])}")
 
             # Verificar cupos disponibles
             df_registros = get_registros_data()
