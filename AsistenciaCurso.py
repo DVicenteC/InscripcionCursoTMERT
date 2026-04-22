@@ -51,16 +51,18 @@ def get_config_data():
             df = pd.DataFrame(data['cursos'])
             if not df.empty:
                 # Convertir columnas de fecha a datetime (detectando formato automáticamente)
-                date_cols = ['fecha_inicio', 'fecha_fin', 'fecha_sesion_1', 'fecha_sesion_2', 'fecha_sesion_3']
+                date_cols = ['fecha_inicio', 'fecha_fin', 'fecha_sesion_1', 'fecha_sesion_2', 'fecha_sesion_3', 'fecha_sesion_4']
                 for col in date_cols:
                     if col in df.columns:
-                        # La API devuelve ISO con timezone (ej: 2026-03-04T03:00:00.000Z)
-                        # Se convierte a UTC naive y se normaliza a medianoche para comparar solo la fecha
                         df[col] = (pd.to_datetime(df[col], utc=True, errors='coerce')
                                    .dt.tz_convert(None)
                                    .dt.normalize())
 
                 df['cupo_maximo'] = pd.to_numeric(df['cupo_maximo'], errors='coerce')
+                if 'num_sesiones' in df.columns:
+                    df['num_sesiones'] = pd.to_numeric(df['num_sesiones'], errors='coerce').fillna(3).astype(int)
+                else:
+                    df['num_sesiones'] = 3
             return df
         else:
             st.error(f"Error al obtener configuración: {data.get('error', 'Error desconocido')}")
@@ -184,7 +186,8 @@ def get_cursos_con_sesion_hoy(df_cursos):
 
     for _, curso in df_cursos.iterrows():
         # Verificar cada sesión
-        for sesion_num in [1, 2, 3]:
+        max_sesiones = int(curso.get('num_sesiones', 3))
+        for sesion_num in range(1, max_sesiones + 1):
             fecha_col = f'fecha_sesion_{sesion_num}'
             if fecha_col in curso and pd.notna(curso[fecha_col]):
                 fecha_sesion = pd.to_datetime(curso[fecha_col]).normalize()
@@ -469,11 +472,11 @@ def main():
         st.subheader("📅 Cursos con Sesión Hoy")
 
         @st.fragment
-        def formulario_asistencia(curso_id, sesion_hoy, region, fecha_str):
+        def formulario_asistencia(curso_id, sesion_hoy, region, fecha_str, num_sesiones=3):
             with st.expander(f"📚 {curso_id} - Sesión {sesion_hoy}", expanded=True):
                 st.write(f"**Región:** {region}")
                 st.write(f"**Fecha:** {fecha_str}")
-                st.write(f"**Sesión:** {sesion_hoy} de 3")
+                st.write(f"**Sesión:** {sesion_hoy} de {num_sesiones}")
 
                 with st.form(key=f"form_{curso_id}_{sesion_hoy}", clear_on_submit=True):
                     rut_input = st.text_input(
@@ -512,7 +515,8 @@ def main():
                 curso_id=curso['curso_id'],
                 sesion_hoy=curso['sesion_hoy'],
                 region=curso.get('region', 'N/A'),
-                fecha_str=curso['fecha_sesion_hoy'].strftime('%d-%m-%Y')
+                fecha_str=curso['fecha_sesion_hoy'].strftime('%d-%m-%Y'),
+                num_sesiones=int(curso.get('num_sesiones', 3))
             )
 
         st.stop()
@@ -541,7 +545,8 @@ def main():
 
                 # Mostrar sesiones disponibles
                 sesiones = []
-                for i in [1, 2, 3]:
+                max_ses = int(curso.get('num_sesiones', 3))
+                for i in range(1, max_ses + 1):
                     if f'fecha_sesion_{i}' in curso and pd.notna(curso[f'fecha_sesion_{i}']):
                         sesiones.append(i)
 
