@@ -359,11 +359,12 @@ try:
         fecha_inicio = st.sidebar.date_input("Fecha de Inicio")
         fecha_fin = st.sidebar.date_input("Fecha de Término")
 
-        # Fechas de sesiones
+        # Número de sesiones y fechas
+        num_sesiones = st.sidebar.selectbox("Número de Sesiones", [3, 4], index=0)
         st.sidebar.write("**Fechas de Sesiones:**")
-        fecha_sesion_1 = st.sidebar.date_input("Fecha Sesión 1")
-        fecha_sesion_2 = st.sidebar.date_input("Fecha Sesión 2")
-        fecha_sesion_3 = st.sidebar.date_input("Fecha Sesión 3")
+        fechas_sesiones = []
+        for i in range(1, num_sesiones + 1):
+            fechas_sesiones.append(st.sidebar.date_input(f"Fecha Sesión {i}"))
 
         # Generar ID automáticamente en formato: CódigoRegión-MesAño
         meses_esp = {
@@ -398,9 +399,11 @@ try:
                     'region': region_curso,
                     'fecha_inicio': fecha_inicio.strftime('%d-%m-%Y'),
                     'fecha_fin': fecha_fin.strftime('%d-%m-%Y'),
-                    'fecha_sesion_1': fecha_sesion_1.strftime('%d-%m-%Y'),
-                    'fecha_sesion_2': fecha_sesion_2.strftime('%d-%m-%Y'),
-                    'fecha_sesion_3': fecha_sesion_3.strftime('%d-%m-%Y'),
+                    'num_sesiones': num_sesiones,
+                    'fecha_sesion_1': fechas_sesiones[0].strftime('%d-%m-%Y') if len(fechas_sesiones) > 0 else '',
+                    'fecha_sesion_2': fechas_sesiones[1].strftime('%d-%m-%Y') if len(fechas_sesiones) > 1 else '',
+                    'fecha_sesion_3': fechas_sesiones[2].strftime('%d-%m-%Y') if len(fechas_sesiones) > 2 else '',
+                    'fecha_sesion_4': fechas_sesiones[3].strftime('%d-%m-%Y') if len(fechas_sesiones) > 3 else '',
                     'cupo_maximo': int(cupo_maximo),
                     'estado': 'ACTIVO'
                 }
