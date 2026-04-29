@@ -276,7 +276,8 @@ def generar_excel_ist(df):
     headers = [
         "RUT trabajador (Sin puntos ni dv)", "DV", "Nombres", "Apellidos (ambos)",
         "Email (individual)", "Género", "Rol trabajador", "Región", "Comuna",
-        "Rut empresa (Sin puntos, con guión)", "Razón social"
+        "Rut empresa (Sin puntos, con guión)", "Razón social",
+        "ID-CT", "NUM SUC", "Nombre Sucursal"
     ]
 
     header_fill = PatternFill("solid", fgColor="1F4E79")
@@ -292,7 +293,7 @@ def generar_excel_ist(df):
         cell.border = border
         ws.row_dimensions[1].height = 30
 
-    widths = [22, 6, 25, 30, 30, 10, 25, 30, 25, 28, 35]
+    widths = [22, 6, 25, 30, 30, 10, 25, 30, 25, 28, 35, 12, 12, 35]
     for col, w in enumerate(widths, 1):
         ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = w
 
@@ -312,6 +313,9 @@ def generar_excel_ist(df):
             getattr(row, 'comuna', ''),
             getattr(row, 'rut_empresa', ''),
             getattr(row, 'razon_social', ''),
+            getattr(row, 'id_ct', ''),
+            getattr(row, 'num_suc', ''),
+            getattr(row, 'nom_suc', ''),
         ]
         for col, val in enumerate(valores, 1):
             cell = ws.cell(row=row_idx, column=col, value=val)
@@ -336,7 +340,7 @@ def generar_excel_mk(df):
     ws.title = "Datos"
 
     headers = ["Rut", "Nombres", "Apellido Paterno", "Apellido Materno",
-               "Sexo", "Nacionalidad", "Rol Trabajador", "Otro Rol"]
+               "Sexo", "Nacionalidad", "Rol Trabajador", "Otro Rol", "Direccion"]
 
     header_fill = PatternFill("solid", fgColor="2E75B6")
     header_font = Font(name="Arial", bold=True, color="FFFFFF", size=10)
@@ -350,7 +354,7 @@ def generar_excel_mk(df):
         cell.alignment = Alignment(horizontal="center")
         cell.border = border
 
-    widths = [18, 25, 25, 25, 8, 14, 16, 25]
+    widths = [18, 25, 25, 25, 8, 14, 16, 25, 35]
     for col, w in enumerate(widths, 1):
         ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = w
 
@@ -367,6 +371,7 @@ def generar_excel_mk(df):
             str(getattr(row, 'nacionalidad', '')).capitalize(),
             rol_str.capitalize(),
             otro_rol,
+            getattr(row, 'direccion', ''),
         ]
         for col, val in enumerate(valores, 1):
             cell = ws.cell(row=row_idx, column=col, value=val)
@@ -395,6 +400,20 @@ def generar_excel_mk(df):
     for r in [("Codigo", "Valor"), (1, "Profesional SST"), (2, "Trabajador"),
               (3, "Miembro Comité Paritario"), (4, "Monitor o Delegado"), (5, "Dirigente Sindical")]:
         wr.append(r)
+
+    # Hoja extra: trazabilidad de centros de trabajo (no afecta carga MK)
+    ws_ct = wb.create_sheet("Centro_Trabajo")
+    ct_headers = ["Rut", "ID-CT", "NUM SUC", "Nombre Sucursal", "Comuna Sucursal", "Suc Resuelta"]
+    for c, h in enumerate(ct_headers, 1):
+        cell = ws_ct.cell(row=1, column=c, value=h); cell.font = header_font; cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center"); cell.border = border
+    for ri, row in enumerate(df.itertuples(index=False), 2):
+        for c, v in enumerate([getattr(row,'rut',''), getattr(row,'id_ct',''),
+                                getattr(row,'num_suc',''), getattr(row,'nom_suc',''),
+                                getattr(row,'comuna_suc',''), getattr(row,'suc_resuelta','')], 1):
+            cell = ws_ct.cell(row=ri, column=c, value=v); cell.font = data_font; cell.border = border
+    for c, w in enumerate([18, 12, 12, 35, 25, 14], 1):
+        ws_ct.column_dimensions[ws_ct.cell(row=1, column=c).column_letter].width = w
 
     buf = io.BytesIO()
     wb.save(buf)

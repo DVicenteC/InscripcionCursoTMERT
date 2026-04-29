@@ -1,9 +1,11 @@
 import streamlit as st
 import pandas as pd
+import polars as pl
 import json
 import time
 import requests
 from datetime import datetime
+from pathlib import Path
 from rut_chile import rut_chile
 import io
 import smtplib
@@ -15,11 +17,69 @@ st.set_page_config(page_title="Inscripción de Participantes", layout="wide")
 
 # Constantes
 COMUNAS_REGIONES_PATH = "comunas-regiones.json"
+MAESTRO_LOCAL_PATH = Path(__file__).parent / "maestro_adherentes.parquet"
 SECRET_PASSWORD = st.secrets["SECRET_PASSWORD"]
 API_URL = st.secrets["API_URL"]  # URL del Apps Script publicado como aplicación web
 API_KEY = st.secrets["API_KEY"]  # Clave API configurada en el Apps Script
 SMTP_USER = st.secrets.get("SMTP_USER", "")
 SMTP_PASSWORD = st.secrets.get("SMTP_PASSWORD", "")
+MAESTRO_URL = st.secrets.get("MAESTRO_URL", None)
+
+def _rut_valido(rut_str):
+    try:
+        return bool(rut_chile.is_valid_rut(str(rut_str).strip()))
+    except Exception:
+        return False
+
+@st.cache_resource(show_spinner="Cargando maestro de adherentes…")
+def load_maestro() -> pl.DataFrame:
+    if MAESTRO_LOCAL_PATH.exists():
+        df = pl.read_parquet(MAESTRO_LOCAL_PATH)
+    elif MAESTRO_URL:
+        try:
+            sess = requests.Session()
+            resp = sess.get(MAESTRO_URL, stream=True, timeout=30)
+            if 'text/html' in resp.headers.get('Content-Type', ''):
+                import re as _re
+                m = _re.search(r'confirm=([0-9A-Za-z_-]+)', resp.text)
+                if m:
+                    resp = sess.get(f"{MAESTRO_URL}&confirm={m.group(1)}", stream=True, timeout=60)
+            resp.raise_for_status()
+            df = pl.read_parquet(io.BytesIO(resp.content))
+        except Exception as e:
+            st.error(f"Error al descargar maestro desde URL: {e}")
+            return pl.DataFrame()
+    else:
+        return pl.DataFrame()
+    cols = ['Rut Empresa', 'Razón Social', 'ID-CT', 'NUM SUC',
+            'C.GLS_NOM_SUC', 'Dirección Suc', 'Comuna Sucursal',
+            'Region Sucursal', 'Est Sucursal', 'Tipo suc']
+    df = df.select([c for c in cols if c in df.columns])
+    return df.filter(pl.col('Est Sucursal') == 'Si') if 'Est Sucursal' in df.columns else df
+
+def _norm_rut(r: str) -> str:
+    try: return rut_chile.format_rut_without_dots(str(r)).upper().strip()
+    except Exception: return str(r).upper().strip()
+
+def buscar_sucursales(rut_empresa: str = "", razon_social: str = "") -> pl.DataFrame:
+    df = load_maestro()
+    if df.is_empty(): return df
+    if rut_empresa and _rut_valido(rut_empresa):
+        rut_n = _norm_rut(rut_empresa)
+        out = df.with_columns(pl.col('Rut Empresa').map_elements(_norm_rut, return_dtype=pl.Utf8).alias('_rut_n')) \
+                .filter(pl.col('_rut_n') == rut_n).drop('_rut_n')
+        if not out.is_empty(): return out
+    if razon_social:
+        return df.filter(pl.col('Razón Social') == razon_social)
+    return pl.DataFrame()
+
+@st.cache_data(show_spinner=False)
+def listar_empresas() -> list[str]:
+    df = load_maestro()
+    if df.is_empty(): return []
+    pdf = df.select(['Razón Social', 'Rut Empresa']).unique().to_pandas()
+    pdf = pdf.dropna(subset=['Razón Social']).sort_values('Razón Social')
+    return [f"{r['Razón Social']} — {r['Rut Empresa']}" for _, r in pdf.iterrows()]
 
 # Listas para formulario
 ROLES = ["TRABAJADOR", "PROFESIONAL SST", "MIEMBRO DE COMITÉ PARITARIO", 
@@ -600,45 +660,84 @@ try:
             # Paso 3: Formulario de inscripción
             st.subheader("3. Complete sus datos")
 
-            # Región y comuna del participante (puede ser diferente a la del curso)
-            st.write("**Datos de ubicación del participante:**")
+            # Región de residencia del participante (la comuna se deriva del CT)
+            st.write("**Datos de ubicación:**")
+            st.caption("La región corresponde a la residencia del participante. La comuna y dirección se completan desde el centro de trabajo.")
+            region = st.selectbox("Región de residencia del participante (*)", regiones, key='region')
 
-            # Inicializar comunas en la primera carga si no existen
-            if 'comunas' not in st.session_state or not st.session_state.comunas:
-                # Cargar comunas de la primera región por defecto
-                for reg in comunas_regiones["regiones"]:
-                    if reg["region"] == regiones[0]:
-                        st.session_state.comunas = reg["comunas"]
-                        break
+            # === Búsqueda de empresa (selectbox único) ===
+            st.write("**Empresa y centro de trabajo:**")
+            empresas_list = listar_empresas()
+            empresa_seleccionada = st.selectbox(
+                "Empresa (*)",
+                options=empresas_list,
+                index=None,
+                placeholder="Escriba el nombre o el RUT de la empresa…",
+                key='empresa_selectbox',
+                help=f"{len(empresas_list):,} empresas disponibles."
+            )
+            razon_social_input = ""
+            rut_empresa_input = ""
+            if empresa_seleccionada:
+                razon_social_input, rut_empresa_input = empresa_seleccionada.rsplit(" — ", 1)
+                rut_empresa_input = rut_empresa_input.strip().upper()
+                st.caption(f"RUT detectado: **{rut_empresa_input}**")
 
-            region = st.selectbox("Región del participante (*)", regiones, key='region', on_change=update_comunas_state)
-            comuna = st.selectbox("Comuna (*)", st.session_state.get('comunas', []), key='comuna')
+            _maestro_check = load_maestro()
+            if _maestro_check.is_empty():
+                st.error("❌ Maestro de adherentes no disponible. Configure `MAESTRO_URL` en los secrets.")
+
+            sucursales_df = buscar_sucursales(rut_empresa_input, razon_social_input)
+            sucursal_sel = None
+            if not sucursales_df.is_empty():
+                pdf = sucursales_df.to_pandas()
+                pdf['_label'] = pdf.apply(
+                    lambda r: f"[{r['ID-CT']}] {r['C.GLS_NOM_SUC']} — {r['Dirección Suc']} ({r['Comuna Sucursal']})",
+                    axis=1
+                )
+                st.success(f"✅ {len(pdf)} centro(s) de trabajo encontrado(s)")
+                opciones = ["— Seleccione un centro de trabajo —"] + pdf['_label'].tolist()
+                seleccion = st.selectbox("Centro de trabajo (*)", opciones, key='sucursal_sel')
+                if seleccion != opciones[0]:
+                    sucursal_sel = pdf[pdf['_label'] == seleccion].iloc[0].to_dict()
+                    with st.expander("Ver detalle del centro de trabajo"):
+                        st.write(f"**ID-CT:** {sucursal_sel['ID-CT']}")
+                        st.write(f"**NUM SUC:** {sucursal_sel['NUM SUC']}")
+                        st.write(f"**Nombre Sucursal:** {sucursal_sel['C.GLS_NOM_SUC']}")
+                        st.write(f"**Dirección:** {sucursal_sel['Dirección Suc']}")
+                        st.write(f"**Comuna:** {sucursal_sel['Comuna Sucursal']}")
+            elif rut_empresa_input or razon_social_input:
+                st.warning("⚠️ No se encontraron centros de trabajo activos.")
 
             with st.form("registro_form"):
                 col1, col2 = st.columns(2)
-                
+
                 with col1:
                     rut = st.text_input("RUT (*)", help="Formato: 12345678-9").upper()
                     nombres = st.text_input("Nombres (*)").upper()
                     apellido_paterno = st.text_input("Apellido Paterno (*)").upper()
                     email = st.text_input("Correo Electrónico (*)", help="ejemplo@dominio.com")
                     gmail = st.text_input("Correo Gmail (*)", help="ejemplo@gmail.com")
-                    
+
                 with col2:
                     sexo = st.selectbox("Sexo (*)", SEXO).upper()
                     apellido_materno = st.text_input("Apellido Materno (*)").upper()
                     nacionalidad = st.selectbox("Nacionalidad (*)", NACIONALIDAD).upper()
                     rol = st.selectbox("Rol (*)", ROLES).upper()
-                
-                col3, col4 = st.columns(2)
-                
-                with col3:
-                    rut_empresa = st.text_input("RUT Empresa (*)").upper()
-                    razon_social = st.text_input("Razón Social (*)").upper()
-        
-                with col4:
-                    direccion = st.text_input("Dirección (*)").upper()
-                
+
+                if sucursal_sel is not None:
+                    rut_empresa = rut_empresa_input or _norm_rut(str(sucursal_sel.get('Rut Empresa', '')))
+                    razon_social = str(sucursal_sel.get('Razón Social', '')).upper()
+                    direccion = str(sucursal_sel['Dirección Suc']).upper()
+                    comuna = str(sucursal_sel['Comuna Sucursal']).upper()
+                    st.info(f"Empresa: **{razon_social}** · CT: **{sucursal_sel['C.GLS_NOM_SUC']}** ({comuna})")
+                else:
+                    st.warning("Sin centro de trabajo seleccionado — ingrese dirección y comuna manualmente:")
+                    rut_empresa = rut_empresa_input
+                    razon_social = razon_social_input
+                    direccion = st.text_input("Dirección del centro de trabajo (*)").upper()
+                    comuna = st.text_input("Comuna del centro de trabajo (*)").upper()
+
                 if st.form_submit_button("Enviar"):
                     # Verificar nuevamente los cupos disponibles
                     df_registros = get_registros_data()
@@ -701,7 +800,12 @@ try:
                             'razon_social': razon_social,
                             'region': region,
                             'comuna': comuna,
-                            'direccion': direccion
+                            'direccion': direccion,
+                            'id_ct': str(sucursal_sel['ID-CT']) if sucursal_sel is not None else '',
+                            'num_suc': str(sucursal_sel['NUM SUC']) if sucursal_sel is not None else '',
+                            'nom_suc': str(sucursal_sel['C.GLS_NOM_SUC']) if sucursal_sel is not None else '',
+                            'comuna_suc': str(sucursal_sel['Comuna Sucursal']) if sucursal_sel is not None else '',
+                            'suc_resuelta': 'Si' if sucursal_sel is not None else 'No'
                         }
                         
                         # Guardar registro
