@@ -660,10 +660,17 @@ try:
             # Paso 3: Formulario de inscripción
             st.subheader("3. Complete sus datos")
 
-            # Región de residencia del participante (la comuna se deriva del CT)
-            st.write("**Datos de ubicación:**")
-            st.caption("La región corresponde a la residencia del participante. La comuna y dirección se completan desde el centro de trabajo.")
-            region = st.selectbox("Región de residencia del participante (*)", regiones, key='region')
+            # Región y comuna de residencia del participante
+            st.write("**Datos de ubicación del participante:**")
+
+            if 'comunas' not in st.session_state or not st.session_state.comunas:
+                for reg in comunas_regiones["regiones"]:
+                    if reg["region"] == regiones[0]:
+                        st.session_state.comunas = reg["comunas"]
+                        break
+
+            region = st.selectbox("Región del participante (*)", regiones, key='region', on_change=update_comunas_state)
+            comuna = st.selectbox("Comuna de residencia (*)", st.session_state.get('comunas', []), key='comuna')
 
             # === Búsqueda de empresa (selectbox único) ===
             st.write("**Empresa y centro de trabajo:**")
@@ -729,14 +736,12 @@ try:
                     rut_empresa = rut_empresa_input or _norm_rut(str(sucursal_sel.get('Rut Empresa', '')))
                     razon_social = str(sucursal_sel.get('Razón Social', '')).upper()
                     direccion = str(sucursal_sel['Dirección Suc']).upper()
-                    comuna = str(sucursal_sel['Comuna Sucursal']).upper()
-                    st.info(f"Empresa: **{razon_social}** · CT: **{sucursal_sel['C.GLS_NOM_SUC']}** ({comuna})")
+                    st.info(f"Empresa: **{razon_social}** · CT: **{sucursal_sel['C.GLS_NOM_SUC']}** ({sucursal_sel['Comuna Sucursal']})")
                 else:
-                    st.warning("Sin centro de trabajo seleccionado — ingrese dirección y comuna manualmente:")
+                    st.warning("Sin centro de trabajo seleccionado — ingrese dirección manualmente:")
                     rut_empresa = rut_empresa_input
                     razon_social = razon_social_input
                     direccion = st.text_input("Dirección del centro de trabajo (*)").upper()
-                    comuna = st.text_input("Comuna del centro de trabajo (*)").upper()
 
                 if st.form_submit_button("Enviar"):
                     # Verificar nuevamente los cupos disponibles
