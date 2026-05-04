@@ -467,11 +467,29 @@ def main():
             st.sidebar.success(f"✅ Sincronizados: {resultado['sincronizados']}")
             if resultado['fallidos'] > 0:
                 st.sidebar.warning(f"⚠️ Fallidos: {resultado['fallidos']}")
+        st.sidebar.caption("Envía a Google Sheets los registros pendientes. SEGURO: no borra nada.")
+
+        # Botón de emergencia: resetear intentos fallidos (desbloquea registros con 5+ intentos)
+        if st.sidebar.button("🆘 Resetear intentos fallidos"):
+            reset_count = buffer.conn.execute("""
+                UPDATE asistencias_buffer
+                SET intentos_sync = 0, ultimo_error = NULL
+                WHERE sincronizado = false AND intentos_sync >= 5
+            """).fetchall()
+            # Sincronizar inmediatamente después
+            with st.spinner("Reintentando sincronización..."):
+                resultado = buffer.sincronizar(batch_size=100)
+            st.sidebar.success(f"✅ Reseteados y sincronizados: {resultado['sincronizados']}")
+            if resultado['fallidos'] > 0:
+                st.sidebar.warning(f"⚠️ Fallidos: {resultado['fallidos']}")
+            st.rerun()
+        st.sidebar.caption("Desbloquea registros con 5+ intentos fallidos y reintenta enviarlos a Sheets. SEGURO: no borra nada.")
 
         # Botón para limpiar todos los sincronizados (incluye los de hoy)
         if st.sidebar.button("🗑️ Limpiar Sincronizados"):
             eliminados = buffer.limpiar_sincronizados(dias=0)
             st.sidebar.success(f"✅ Eliminados: {eliminados} registros")
+        st.sidebar.caption("Borra del buffer local SOLO los que ya están en Sheets. SEGURO: los datos siguen en Sheets.")
 
         # Botón para borrar TODO el buffer y re-hidratar desde Sheets
         if st.sidebar.button("🚨 Borrar Todo el Buffer", type="primary"):
@@ -479,6 +497,7 @@ def main():
             buffer.hydrate_from_sheets()  # Recargar lo que ya está en Sheets
             st.sidebar.success("✅ Buffer vaciado y recargado desde Sheets")
             st.rerun()
+        st.sidebar.caption("⚠️ PELIGRO: borra TODO el buffer y recarga desde Sheets. Si hay Pendientes o Fallidas, ESOS DATOS SE PIERDEN. Sincroniza primero.")
 
         st.sidebar.divider()
 
