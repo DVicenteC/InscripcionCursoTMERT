@@ -24,7 +24,7 @@ API_KEY = st.secrets["API_KEY"]  # Clave API configurada en el Apps Script
 SMTP_USER = st.secrets.get("SMTP_USER", "")
 SMTP_PASSWORD = st.secrets.get("SMTP_PASSWORD", "")
 MAESTRO_URL = st.secrets.get("MAESTRO_URL", None)
-
+st.write("DEBUG MAESTRO_URL:", repr(st.secrets.get("MAESTRO_URL")))
 def _rut_valido(rut_str):
     try:
         return bool(rut_chile.is_valid_rut(str(rut_str).strip()))
