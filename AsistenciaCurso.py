@@ -816,9 +816,9 @@ def main():
                                 num_sesiones_total = int(curso.get('num_sesiones', 3))
                                 
                                 st.download_button(
-                                    label=f"📥 Descargar Consolidado {curso_seleccionado} (.xlsx)",
+                                    label=f"📥 Descargar Consolidado (Búsqueda Global) - {curso_seleccionado} (.xlsx)",
                                     data=generar_excel_consolidado(df_reg_rep, df_asist_todas, num_sesiones_total),
-                                    file_name=f"Consolidado_{curso_seleccionado}.xlsx",
+                                    file_name=f"Consolidado_GLOBAL_{curso_seleccionado}.xlsx",
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                                 )
 
