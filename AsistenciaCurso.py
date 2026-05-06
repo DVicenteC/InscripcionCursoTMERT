@@ -810,9 +810,9 @@ def main():
                             st.markdown("### 📊 Reporte Consolidado Final")
                             st.caption("Muestra la asistencia de TODAS las sesiones para todos los inscritos en este curso.")
                             
-                            # Obtener TODAS las asistencias del curso (de todas las sesiones)
-                            with st.spinner("Generando matriz de asistencia..."):
-                                df_asist_todas = get_asistencias_desde_sheets(curso_id=curso_seleccionado)
+                            # Obtener TODAS las asistencias de TODOS los cursos para búsqueda global por RUT
+                            with st.spinner("Generando matriz de asistencia global..."):
+                                df_asist_todas = get_asistencias_desde_sheets()
                                 num_sesiones_total = int(curso.get('num_sesiones', 3))
                                 
                                 st.download_button(
