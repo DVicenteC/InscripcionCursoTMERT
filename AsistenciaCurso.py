@@ -430,6 +430,95 @@ def generar_excel_mk(df):
     return buf
 
 
+def generar_excel_consolidado(df_reg, df_asist, num_sesiones):
+    """
+    Genera Excel con matriz de asistencia de todas las sesiones.
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Consolidado Final"
+
+    # Preparar headers
+    headers = ["RUT", "Nombre Completo", "Empresa"]
+    for i in range(1, num_sesiones + 1):
+        headers.append(f"Sesión {i}")
+    headers.append("% Asistencia")
+
+    # Estilos
+    header_fill = PatternFill("solid", fgColor="4472C4")
+    header_font = Font(name="Arial", bold=True, color="FFFFFF", size=10)
+    thin = Side(style='thin', color="AAAAAA")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.font = header_font; cell.fill = header_fill; cell.border = border
+        cell.alignment = Alignment(horizontal="center")
+
+    # Column widths
+    ws.column_dimensions['A'].width = 18
+    ws.column_dimensions['B'].width = 35
+    ws.column_dimensions['C'].width = 30
+    for i in range(4, 4 + num_sesiones + 1):
+        ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = 15
+
+    # Llenar datos
+    data_font = Font(name="Arial", size=10)
+    
+    # Pre-procesar asistencias para búsqueda rápida
+    # Diccionario: {rut_norm: set(sesion_int)}
+    asist_map = {}
+    if not df_asist.empty:
+        for row in df_asist.itertuples():
+            rut = str(getattr(row, 'rut', '')).upper().strip()
+            # Convertir sesión a int manejando posibles floats o strings
+            try:
+                s_val = getattr(row, 'sesion', 0)
+                sesion = int(float(s_val)) if s_val else 0
+            except:
+                sesion = 0
+                
+            if rut not in asist_map:
+                asist_map[rut] = set()
+            asist_map[rut].add(sesion)
+
+    row_idx = 2
+    for row in df_reg.itertuples():
+        rut = str(getattr(row, 'rut', '')).upper().strip()
+        nombre = f"{getattr(row, 'nombres', '')} {getattr(row, 'apellido_paterno', '')} {getattr(row, 'apellido_materno', '')}".strip()
+        empresa = getattr(row, 'razon_social', '')
+        
+        ws.cell(row=row_idx, column=1, value=rut).font = data_font
+        ws.cell(row=row_idx, column=2, value=nombre).font = data_font
+        ws.cell(row=row_idx, column=3, value=empresa).font = data_font
+        
+        asistidas = 0
+        current_map = asist_map.get(rut, set())
+        
+        for i in range(1, num_sesiones + 1):
+            presente = i in current_map
+            val = "✅" if presente else "❌"
+            if presente: asistidas += 1
+            
+            cell = ws.cell(row=row_idx, column=3 + i, value=val)
+            cell.font = data_font
+            cell.alignment = Alignment(horizontal="center")
+            cell.border = border
+
+        # Porcentaje
+        perc = f"{int((asistidas/num_sesiones)*100)}%"
+        ws.cell(row=row_idx, column=3 + num_sesiones + 1, value=perc).font = data_font
+        ws.cell(row=row_idx, column=3 + num_sesiones + 1, value=perc).alignment = Alignment(horizontal="center")
+        ws.cell(row=row_idx, column=3 + num_sesiones + 1, value=perc).border = border
+        
+        row_idx += 1
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
 # ==================== INTERFAZ PRINCIPAL ====================
 
 def main():
@@ -709,13 +798,29 @@ def main():
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                                 )
                             with col_r2:
-                                st.markdown("**Formato MK Capacitaciones**")
+                                    st.markdown("**Formato MK Capacitaciones**")
+                                    st.download_button(
+                                        label="📥 Descargar MK Capacitaciones (.xlsx)",
+                                        data=generar_excel_mk(df_asistentes_rep),
+                                        file_name=f"MK_{curso_seleccionado}_s{sesion_seleccionada}.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                    )
+                            
+                            st.markdown("---")
+                            st.markdown("### 📊 Reporte Consolidado Final")
+                            st.caption("Muestra la asistencia de TODAS las sesiones para todos los inscritos en este curso.")
+                            
+                            # Obtener TODAS las asistencias del curso (de todas las sesiones)
+                            with st.spinner("Generando matriz de asistencia..."):
+                                df_asist_todas = get_asistencias_desde_sheets(curso_id=curso_seleccionado)
+                                num_sesiones_total = int(curso.get('num_sesiones', 3))
+                                
                                 st.download_button(
-                                    label="📥 Descargar MK Capacitaciones (.xlsx)",
-                                    data=generar_excel_mk(df_asistentes_rep),
-                                    file_name=f"MK_{curso_seleccionado}_s{sesion_seleccionada}.xlsx",
+                                    label=f"📥 Descargar Consolidado {curso_seleccionado} (.xlsx)",
+                                    data=generar_excel_consolidado(df_reg_rep, df_asist_todas, num_sesiones_total),
+                                    file_name=f"Consolidado_{curso_seleccionado}.xlsx",
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                )              
+                                )
 
         # TAB 2: Mantenimiento
         with tab2:
