@@ -430,17 +430,18 @@ def generar_excel_mk(df):
     return buf
 
 
-def generar_excel_consolidado(df_reg, df_asist, num_sesiones):
+def generar_excel_consolidado(df_reg, df_asist, config_sesiones=None):
     """
     Genera Excel con matriz de asistencia de todas las sesiones.
+    config_sesiones: dict {curso_id: num_sesiones}
     """
     wb = Workbook()
     ws = wb.active
     ws.title = "Consolidado Final"
 
     # Preparar headers
-    headers = ["RUT", "Nombre Completo", "Empresa"]
-    for i in range(1, num_sesiones + 1):
+    headers = ["Curso Original", "RUT", "Nombre Completo", "Empresa"]
+    for i in range(1, 5): # Mostramos hasta 4 para que sea uniforme
         headers.append(f"Sesión {i}")
     headers.append("% Asistencia")
 
@@ -456,60 +457,66 @@ def generar_excel_consolidado(df_reg, df_asist, num_sesiones):
         cell.alignment = Alignment(horizontal="center")
 
     # Column widths
-    ws.column_dimensions['A'].width = 18
-    ws.column_dimensions['B'].width = 35
-    ws.column_dimensions['C'].width = 30
-    for i in range(4, 4 + num_sesiones + 1):
+    ws.column_dimensions['A'].width = 25
+    ws.column_dimensions['B'].width = 18
+    ws.column_dimensions['C'].width = 35
+    ws.column_dimensions['D'].width = 30
+    for i in range(5, 5 + 4 + 1):
         ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = 15
 
     # Llenar datos
     data_font = Font(name="Arial", size=10)
     
-    # Pre-procesar asistencias para búsqueda rápida
-    # Diccionario: {rut_norm: set(sesion_int)}
+    # Pre-procesar asistencias
     asist_map = {}
     if not df_asist.empty:
         for row in df_asist.itertuples():
             rut = str(getattr(row, 'rut', '')).upper().strip()
-            # Convertir sesión a int manejando posibles floats o strings
             try:
                 s_val = getattr(row, 'sesion', 0)
                 sesion = int(float(s_val)) if s_val else 0
             except:
                 sesion = 0
-                
-            if rut not in asist_map:
-                asist_map[rut] = set()
+            if rut not in asist_map: asist_map[rut] = set()
             asist_map[rut].add(sesion)
 
     row_idx = 2
     for row in df_reg.itertuples():
+        curso_id = getattr(row, 'curso_id', '')
         rut = str(getattr(row, 'rut', '')).upper().strip()
         nombre = f"{getattr(row, 'nombres', '')} {getattr(row, 'apellido_paterno', '')} {getattr(row, 'apellido_materno', '')}".strip()
         empresa = getattr(row, 'razon_social', '')
         
-        ws.cell(row=row_idx, column=1, value=rut).font = data_font
-        ws.cell(row=row_idx, column=2, value=nombre).font = data_font
-        ws.cell(row=row_idx, column=3, value=empresa).font = data_font
+        ws.cell(row=row_idx, column=1, value=curso_id).font = data_font
+        ws.cell(row=row_idx, column=2, value=rut).font = data_font
+        ws.cell(row=row_idx, column=3, value=nombre).font = data_font
+        ws.cell(row=row_idx, column=4, value=empresa).font = data_font
         
         asistidas = 0
         current_map = asist_map.get(rut, set())
+        # Cuántas sesiones tiene este curso específico
+        n_target = int(config_sesiones.get(curso_id, 3)) if config_sesiones else 3
         
-        for i in range(1, num_sesiones + 1):
+        for i in range(1, 5):
             presente = i in current_map
-            val = "✅" if presente else "❌"
             if presente: asistidas += 1
             
-            cell = ws.cell(row=row_idx, column=3 + i, value=val)
+            # Si el curso solo tiene 3 sesiones, la celda 4 sale vacía o con guión
+            if i > n_target:
+                val = "-"
+            else:
+                val = "✅" if presente else "❌"
+            
+            cell = ws.cell(row=row_idx, column=4 + i, value=val)
             cell.font = data_font
             cell.alignment = Alignment(horizontal="center")
             cell.border = border
 
-        # Porcentaje
-        perc = f"{int((asistidas/num_sesiones)*100)}%"
-        ws.cell(row=row_idx, column=3 + num_sesiones + 1, value=perc).font = data_font
-        ws.cell(row=row_idx, column=3 + num_sesiones + 1, value=perc).alignment = Alignment(horizontal="center")
-        ws.cell(row=row_idx, column=3 + num_sesiones + 1, value=perc).border = border
+        # Porcentaje dinámico basado en n_target
+        perc = f"{int((asistidas/n_target)*100)}%"
+        ws.cell(row=row_idx, column=4 + 4 + 1, value=perc).font = data_font
+        ws.cell(row=row_idx, column=4 + 4 + 1, value=perc).alignment = Alignment(horizontal="center")
+        ws.cell(row=row_idx, column=4 + 4 + 1, value=perc).border = border
         
         row_idx += 1
 
@@ -694,27 +701,6 @@ def main():
             if df_cursos.empty:
                 st.warning("⚠️ No hay cursos disponibles")
             else:
-                # --- NUEVA SECCIÓN GLOBAL ---
-                st.markdown("### 🌍 Reportes Nacionales (Globales)")
-                st.caption("Estos reportes no dependen del curso seleccionado. Incluyen a todos los inscritos del país.")
-                
-                if st.button("📊 Generar Maestro Nacional (+1000 registros)", key="btn_maestro_nacional_v2"):
-                    with st.spinner("🚀 Procesando base de datos nacional completa..."):
-                        df_reg_total = get_registros_data()
-                        df_asist_total = get_asistencias_desde_sheets()
-                        # Forzamos 4 sesiones
-                        excel_nacional = generar_excel_consolidado(df_reg_total, df_asist_total, 4)
-                        
-                        st.download_button(
-                            label="📥 Descargar Maestro Nacional Completo (.xlsx)",
-                            data=excel_nacional,
-                            file_name="Reporte_Asistencia_Nacional_Consolidado.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-                
-                st.divider()
-                st.subheader("📝 Gestión por Curso")
-                
                 # Seleccionar curso
                 curso_ids = df_cursos['curso_id'].tolist()
                 curso_seleccionado = st.selectbox("Selecciona un curso", curso_ids)
@@ -828,6 +814,32 @@ def main():
                                     )
                             
                             # Eliminamos el reporte consolidado de aquí porque ahora es Nacional/Global arriba
+                    st.divider()
+
+                # --- NUEVA SECCIÓN GLOBAL (MOVIDA AL FINAL) ---
+                st.markdown("### 🌍 Reportes Nacionales (Globales)")
+                st.caption("Estos reportes incluyen a todos los inscritos del país y calculan el porcentaje según el número de sesiones de cada curso.")
+                
+                if st.button("📊 Generar Maestro Nacional (+1000 registros)", key="btn_maestro_nacional_v3"):
+                    with st.spinner("🚀 Procesando base de datos nacional completa..."):
+                        df_reg_total = get_registros_data()
+                        df_asist_total = get_asistencias_desde_sheets()
+                        df_conf_total = get_config_data()
+                        
+                        # Crear mapeo de curso_id -> num_sesiones para porcentaje inteligente
+                        if not df_conf_total.empty:
+                            config_sesiones = df_conf_total.set_index('curso_id')['num_sesiones'].to_dict()
+                        else:
+                            config_sesiones = {}
+                            
+                        excel_nacional = generar_excel_consolidado(df_reg_total, df_asist_total, config_sesiones)
+                        
+                        st.download_button(
+                            label="📥 Descargar Maestro Nacional Completo (.xlsx)",
+                            data=excel_nacional,
+                            file_name="Reporte_Asistencia_Nacional_Consolidado.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
 
         # TAB 2: Mantenimiento
         with tab2:
