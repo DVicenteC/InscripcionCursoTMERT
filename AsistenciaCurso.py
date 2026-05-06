@@ -694,6 +694,27 @@ def main():
             if df_cursos.empty:
                 st.warning("⚠️ No hay cursos disponibles")
             else:
+                # --- NUEVA SECCIÓN GLOBAL ---
+                st.markdown("### 🌍 Reportes Nacionales (Globales)")
+                st.caption("Estos reportes no dependen del curso seleccionado. Incluyen a todos los inscritos del país.")
+                
+                if st.button("📊 Generar Maestro Nacional (+1000 registros)", key="btn_maestro_nacional_v2"):
+                    with st.spinner("🚀 Procesando base de datos nacional completa..."):
+                        df_reg_total = get_registros_data()
+                        df_asist_total = get_asistencias_desde_sheets()
+                        # Forzamos 4 sesiones
+                        excel_nacional = generar_excel_consolidado(df_reg_total, df_asist_total, 4)
+                        
+                        st.download_button(
+                            label="📥 Descargar Maestro Nacional Completo (.xlsx)",
+                            data=excel_nacional,
+                            file_name="Reporte_Asistencia_Nacional_Consolidado.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                
+                st.divider()
+                st.subheader("📝 Gestión por Curso")
+                
                 # Seleccionar curso
                 curso_ids = df_cursos['curso_id'].tolist()
                 curso_seleccionado = st.selectbox("Selecciona un curso", curso_ids)
@@ -806,21 +827,7 @@ def main():
                                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                                     )
                             
-                            st.markdown("---")
-                            st.markdown("### 📊 Reporte Consolidado Final")
-                            st.caption("Muestra la asistencia de TODAS las sesiones para todos los inscritos en este curso.")
-                            
-                            # Obtener TODAS las asistencias de TODOS los cursos para búsqueda global por RUT
-                            with st.spinner("Generando matriz de asistencia global..."):
-                                df_asist_todas = get_asistencias_desde_sheets()
-                                num_sesiones_total = int(curso.get('num_sesiones', 3))
-                                
-                                st.download_button(
-                                    label=f"📥 Descargar Consolidado (Búsqueda Global) - {curso_seleccionado} (.xlsx)",
-                                    data=generar_excel_consolidado(df_reg_rep, df_asist_todas, num_sesiones_total),
-                                    file_name=f"Consolidado_GLOBAL_{curso_seleccionado}.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                )
+                            # Eliminamos el reporte consolidado de aquí porque ahora es Nacional/Global arriba
 
         # TAB 2: Mantenimiento
         with tab2:
