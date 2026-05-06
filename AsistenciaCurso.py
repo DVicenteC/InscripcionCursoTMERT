@@ -211,14 +211,15 @@ def get_cursos_con_sesion_hoy(df_cursos):
     else:
         return pd.DataFrame()
 
-def validar_participante_inscrito(rut, curso_id, df_registros):
+def validar_participante_inscrito(rut, df_registros, curso_id_actual=None):
     """
-    Verifica si un participante está inscrito en un curso.
+    Verifica si un participante está inscrito en el sistema (búsqueda global).
+    Prioriza el curso_id_actual si el participante está en varios cursos.
 
     Args:
         rut: RUT del participante
-        curso_id: ID del curso
         df_registros: DataFrame con registros de inscripciones
+        curso_id_actual: ID del curso del formulario actual (para priorizar)
 
     Returns:
         tuple: (bool, dict) - (está_inscrito, datos_participante)
@@ -226,17 +227,25 @@ def validar_participante_inscrito(rut, curso_id, df_registros):
     if df_registros.empty:
         return False, None
 
-    # Buscar participante — comparación case-insensitive (ej: 12345678-k == 12345678-K)
+    # Normalizar RUT de entrada a mayúsculas
     rut_norm = str(rut).upper().strip()
-    participante = df_registros[
-        (df_registros['rut'].astype(str).str.upper().str.strip() == rut_norm) &
-        (df_registros['curso_id'] == curso_id)
+    
+    # Búsqueda global del RUT
+    participantes = df_registros[
+        df_registros['rut'].astype(str).str.upper().str.strip() == rut_norm
     ]
 
-    if not participante.empty:
-        return True, participante.iloc[0].to_dict()
-    else:
+    if participantes.empty:
         return False, None
+
+    # Si se pasó un curso_id_actual, intentar encontrar la coincidencia exacta primero
+    if curso_id_actual:
+        coincidencia = participantes[participantes['curso_id'] == curso_id_actual]
+        if not coincidencia.empty:
+            return True, coincidencia.iloc[0].to_dict()
+
+    # Si no hay coincidencia exacta o no se pasó, retornar el primer registro encontrado
+    return True, participantes.iloc[0].to_dict()
 
 # ==================== GENERACIÓN DE REPORTES EXCEL ====================
 
@@ -505,6 +514,12 @@ def main():
 
     if not admin_mode:
         st.info("👤 **Modo Participante:** Marca tu asistencia ingresando tu RUT")
+        
+        st.warning("""
+            📍 **Participantes de Regiones:** Si estás asistiendo a la sesión virtual de hoy, 
+            puedes marcar tu asistencia en **cualquiera** de los cuadros de abajo. 
+            El sistema reconocerá automáticamente tu curso de origen.
+        """)
 
         # Obtener cursos con sesión hoy
         df_cursos = get_config_data()
@@ -538,19 +553,27 @@ def main():
                         else:
                             df_registros = get_registros_data()
                             esta_inscrito, datos = validar_participante_inscrito(
-                                rut_input, curso_id, df_registros
+                                rut_input, df_registros, curso_id_actual=curso_id
                             )
                             if not esta_inscrito:
-                                st.error("❌ No estás inscrito en este curso. Contacta al administrador.")
+                                st.error("❌ No estás inscrito en ningún curso. Contacta al administrador.")
                             else:
+                                # Identificar el curso real del participante (puede ser distinto al del formulario)
+                                curso_real = datos.get('curso_id', curso_id)
+                                
                                 resultado = guardar_asistencia_buffer(
-                                    curso_id=curso_id,
+                                    curso_id=curso_real,
                                     rut=rut_input,
                                     sesion=sesion_hoy
                                 )
                                 if resultado['success']:
                                     nombre_completo = f"{datos.get('nombres', '')} {datos.get('apellido_paterno', '')}".strip() or rut_input
                                     st.success(f"✅ ¡Asistencia registrada para {nombre_completo}!")
+                                    
+                                    # Informar si se registró en un curso distinto al del botón
+                                    if str(curso_real) != str(curso_id):
+                                        st.info(f"📍 Tu asistencia fue asignada a tu curso original: **{curso_real}**")
+                                        
                                     st.info("🎉 Ya puedes cerrar esta pestaña.")
                                     st.balloons()
                                 else:
@@ -638,15 +661,18 @@ def main():
                             else:
                                 df_registros = get_registros_data()
                                 esta_inscrito, datos = validar_participante_inscrito(
-                                    rut, curso_seleccionado, df_registros
+                                    rut, df_registros, curso_id_actual=curso_seleccionado
                                 )
 
                                 if not esta_inscrito:
-                                    st.error("❌ Participante no inscrito en este curso")
+                                    st.error("❌ Participante no encontrado en el sistema")
                                 else:
+                                    # Usar el curso real del alumno
+                                    curso_real = datos.get('curso_id', curso_seleccionado)
+                                    
                                     resultado = buffer.marcar_asistencia(
-                                        curso_id=curso_seleccionado,
-                                        rut=rut,
+                                        curso_id=curso_real,
+                                        rut=rut.strip().upper(),
                                         sesion=sesion_seleccionada,
                                         estado=estado,
                                         metodo='admin_manual'
@@ -654,7 +680,10 @@ def main():
 
                                     if resultado['success']:
                                         nombre_completo = f"{datos.get('nombres', '')} {datos.get('apellido_paterno', '')}".strip() or datos.get('nombre', rut)
-                                        st.success(f"✅ Asistencia registrada — {nombre_completo} ({rut})")
+                                        msg = f"✅ Asistencia registrada — {nombre_completo} ({rut})"
+                                        if str(curso_real) != str(curso_seleccionado):
+                                            msg += f" [Curso: {curso_real}]"
+                                        st.success(msg)
                                     else:
                                         st.error(f"❌ {resultado['message']}")
                     st.divider()
