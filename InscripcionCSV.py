@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from rut_chile import rut_chile
 import io
+import unicodedata
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -325,6 +326,102 @@ def get_curso_activo():
         return None
 
 # Función para actualizar comunas basado en la región seleccionada
+# ---- Región del participante vs región del curso -----------------------------------
+# Tres fuentes escriben la región de tres formas distintas: el formulario usa el nombre
+# largo ('Región de Valparaíso'), el maestro de adherentes el número con o sin cero a la
+# izquierda ('05', '5'), y Config el mismo nombre largo. Se comparan por NÚMERO.
+_REGION_KW = [
+    ("arica", 15), ("tarapac", 1), ("antofagasta", 2), ("atacama", 3),
+    ("coquimbo", 4), ("valpara", 5), ("higgins", 6), ("maule", 7),
+    ("nuble", 16), ("biob", 8), ("araucan", 9), ("los rios", 14),
+    ("los lagos", 10), ("aisen", 11), ("aysen", 11), ("magallanes", 12),
+    ("metropol", 13), ("santiago", 13),
+]
+_NOMBRE_REGION = {
+    1: "Región de Tarapacá", 2: "Región de Antofagasta", 3: "Región de Atacama",
+    4: "Región de Coquimbo", 5: "Región de Valparaíso",
+    6: "Región del Libertador Gral. Bernardo O'Higgins", 7: "Región del Maule",
+    8: "Región del Biobío", 9: "Región de la Araucanía", 10: "Región de Los Lagos",
+    11: "Región Aisén del Gral. Carlos Ibáñez del Campo",
+    12: "Región de Magallanes y de la Antártica Chilena",
+    13: "Región Metropolitana de Santiago", 14: "Región de Los Ríos",
+    15: "Región de Arica y Parinacota", 16: "Región de Ñuble",
+}
+
+
+def _num_region(valor):
+    """Número de región (1-16) desde cualquiera de las formas que conviven en el
+    ecosistema. None si no se reconoce: ante la duda NO se advierte, para no producir
+    falsos positivos con un dato que no se entendió."""
+    if valor is None:
+        return None
+    s = str(valor).strip()
+    if not s or s.lower() in ("nan", "none"):
+        return None
+    if s.isdigit():
+        n = int(s)
+        return n if 1 <= n <= 16 else None
+    s = "".join(c for c in unicodedata.normalize("NFD", s.lower())
+                if unicodedata.category(c) != "Mn")
+    for kw, n in _REGION_KW:
+        if kw in s:
+            return n
+    return None
+
+
+def _discrepancia_region(curso, region_residencia, sucursal):
+    """None si el curso es de una región del participante; si no, el detalle para
+    advertirle.
+
+    Se aceptan como 'suyas' tanto la región de residencia como la del centro de
+    trabajo: quien vive en una y trabaja en la vecina puede cursar en cualquiera de las
+    dos. Se advierte sólo cuando el curso NO calza con ninguna de las conocidas. Existe
+    porque alguien de Copiapó quedó inscrito a un curso 100 % presencial en Valparaíso
+    sin que nada se lo dijera."""
+    reg_curso = _num_region((curso or {}).get("region"))
+    if not reg_curso:
+        return None
+    reg_res = _num_region(region_residencia)
+    reg_ct = _num_region(sucursal.get("Region Sucursal")) if sucursal else None
+    conocidas = {r for r in (reg_res, reg_ct) if r}
+    if not conocidas or reg_curso in conocidas:
+        return None
+    mod = str((curso or {}).get("modalidad_460", "") or "").strip().lower()
+    if mod.startswith("pres"):
+        nota = "Este curso es **100 % presencial**: las tres sesiones son en persona en esa región."
+    else:
+        nota = "La sesión 1 es a distancia, pero las sesiones **2 y 3 son presenciales en esa región**."
+    return {
+        "region_curso": str(curso.get("region", "")),
+        "residencia": _NOMBRE_REGION.get(reg_res, str(region_residencia or "")) if reg_res else "no informada",
+        "centro_trabajo": _NOMBRE_REGION.get(reg_ct, "") if reg_ct else "no informada",
+        "nota_modalidad": nota,
+    }
+
+
+def _finalizar_inscripcion(registro, curso):
+    """Guarda, confirma en pantalla, envía el correo y recarga. Lo comparten el envío
+    normal y la confirmación '¿Desea continuar?'. Devuelve False si no se guardó."""
+    if not guardar_registro(registro):
+        return False
+    st.session_state.pop("inscripcion_pendiente", None)
+    st.success("✅ Registro guardado exitosamente")
+    st.balloons()
+    # Correo de confirmación (silencioso si falla)
+    enviar_confirmacion(
+        destinatario=registro["email"],
+        nombres=registro["nombres"],
+        apellido_paterno=registro["apellido_paterno"],
+        rut=registro["rut"],
+        curso_id=curso["curso_id"],
+        region=registro["region"],
+        fecha_inicio=str(curso.get("fecha_inicio", "")),
+    )
+    time.sleep(2)
+    st.rerun()
+    return True
+
+
 def update_comunas_state():
     # Reinicia la lista de comunas cada vez que se selecciona una región
     st.session_state.comunas = []
@@ -452,6 +549,20 @@ try:
 
         cupo_maximo = st.sidebar.number_input("Cupo Máximo", min_value=1, value=50)
 
+        # Modalidad de la sesión 1. Las sesiones 2 y 3 son presenciales siempre, así que
+        # lo único que varía por versión es el 460: nacional a distancia, o presencial
+        # propio (Valparaíso siempre; otras regiones de forma excepcional). Sin este dato
+        # el formulario no puede advertir a alguien de otra región que se inscribe a un
+        # curso 100% presencial — que es exactamente lo que pasó.
+        modalidad_460 = st.sidebar.selectbox(
+            "Modalidad sesión 1 (460)",
+            ["Virtual", "Presencial"],
+            index=0,
+            help=("Virtual: la sesión 1 es la jornada nacional a distancia; sólo las "
+                  "sesiones 2 y 3 son presenciales en la región. "
+                  "Presencial: las TRES sesiones son presenciales en la región."),
+        )
+
         if st.sidebar.button("Crear Curso"):
             # Validaciones
             if not curso_id:
@@ -471,6 +582,7 @@ try:
                     'fecha_sesion_3': fechas_sesiones[2].strftime('%d-%m-%Y') if len(fechas_sesiones) > 2 else '',
                     'fecha_sesion_4': fechas_sesiones[3].strftime('%d-%m-%Y') if len(fechas_sesiones) > 3 else '',
                     'cupo_maximo': int(cupo_maximo),
+                    'modalidad_460': modalidad_460,
                     'estado': 'ACTIVO'
                 }
 
@@ -617,6 +729,23 @@ try:
 
             # Mostrar información del curso seleccionado
             st.info(f"**Curso seleccionado:** {curso_actual['curso_id']}")
+
+            # Advertencia por modalidad: un curso Presencial exige asistir en persona a
+            # las TRES sesiones en su región. Quien trabaja en otra región debe elegir
+            # el curso de la suya; sin este aviso el formulario dejaba inscribirse igual.
+            _mod = str(curso_actual.get('modalidad_460', '') or '').strip().lower()
+            _reg = curso_actual.get('region', 'la región') or 'la región'
+            if _mod.startswith('pres'):
+                st.warning(
+                    f"⚠️ **Curso 100% presencial en {_reg}.** Las tres sesiones requieren "
+                    f"asistir en persona. Si tu centro de trabajo está en otra región, "
+                    f"elige el curso de tu región."
+                )
+            elif _mod.startswith('virt'):
+                st.caption(
+                    f"Sesión 1 a distancia (jornada nacional). Sesiones 2 y 3 presenciales "
+                    f"en {_reg}."
+                )
             st.write(f"**Período:** {formato_fecha_dd_mm_yyyy(curso_actual['fecha_inicio'])} - {formato_fecha_dd_mm_yyyy(curso_actual['fecha_fin'])}")
 
             # Mostrar fechas de sesiones si están disponibles
@@ -713,6 +842,17 @@ try:
                         st.write(f"**Comuna:** {sucursal_sel['Comuna Sucursal']}")
             elif rut_empresa_input or razon_social_input:
                 st.warning("⚠️ No se encontraron centros de trabajo activos.")
+
+            # Aviso temprano si el curso no es de la región del participante (ni por
+            # residencia ni por centro de trabajo). La confirmación dura va al enviar.
+            _disc_previa = _discrepancia_region(curso_actual, region, sucursal_sel)
+            if _disc_previa:
+                st.warning(
+                    f"⚠️ Este curso se dicta en **{_disc_previa['region_curso']}** y tu región de "
+                    f"residencia es **{_disc_previa['residencia']}** (centro de trabajo: "
+                    f"{_disc_previa['centro_trabajo']}). {_disc_previa['nota_modalidad']} "
+                    f"Al enviar se te pedirá confirmar."
+                )
 
             with st.form("registro_form"):
                 col1, col2 = st.columns(2)
@@ -811,22 +951,37 @@ try:
                             'suc_resuelta': 'Si' if sucursal_sel is not None else 'No'
                         }
                         
-                        # Guardar registro
-                        if guardar_registro(nuevo_registro):
-                            st.success("✅ Registro guardado exitosamente")
-                            st.balloons()
-                            # Enviar correo de confirmación (silencioso si falla)
-                            enviar_confirmacion(
-                                destinatario=email,
-                                nombres=nombres,
-                                apellido_paterno=apellido_paterno,
-                                rut=rut_limpio,
-                                curso_id=curso_actual['curso_id'],
-                                region=region,
-                                fecha_inicio=str(curso_actual.get('fecha_inicio', ''))
-                            )
-                            time.sleep(2)
+                        # ¿El curso es de la región del participante? Si no calza ni con su
+                        # residencia ni con su centro de trabajo, NO se guarda todavía: se
+                        # deja pendiente y se pide confirmación explícita más abajo.
+                        discrepancia = _discrepancia_region(curso_actual, region, sucursal_sel)
+                        if discrepancia:
+                            st.session_state["inscripcion_pendiente"] = {
+                                "registro": nuevo_registro,
+                                "curso": dict(curso_actual),
+                                "detalle": discrepancia,
+                            }
                             st.rerun()
+                        _finalizar_inscripcion(nuevo_registro, curso_actual)
+
+            # ---- Confirmación "¿Desea continuar?" cuando la región no calza ----------
+            # Fuera del form a propósito: dentro, el único botón posible es el de envío.
+            pendiente = st.session_state.get("inscripcion_pendiente")
+            if pendiente:
+                d = pendiente["detalle"]
+                st.warning("⚠️ **Estás por inscribirte en un curso de otra región.**")
+                st.markdown(f"- Curso **{pendiente['curso']['curso_id']}**: se dicta en **{d['region_curso']}**")
+                st.markdown(f"- Tu región de residencia: **{d['residencia']}**")
+                st.markdown(f"- Región de tu centro de trabajo: **{d['centro_trabajo']}**")
+                st.markdown(d["nota_modalidad"])
+                st.markdown("**¿Deseas continuar de todos modos?**")
+                c1, c2 = st.columns(2)
+                if c1.button("✅ Sí, deseo continuar", key="btn_confirmar_region", use_container_width=True):
+                    _finalizar_inscripcion(pendiente["registro"], pendiente["curso"])
+                if c2.button("↩️ No, elegir el curso de mi región", key="btn_cancelar_region", use_container_width=True):
+                    st.session_state.pop("inscripcion_pendiente", None)
+                    st.info("Vuelve al paso 1 y elige el curso de tu región.")
+                    st.rerun()
 
     except Exception as e:
         st.error(f"Error al cargar cursos: {str(e)}")
