@@ -32,29 +32,41 @@ def _rut_valido(rut_str):
     except Exception:
         return False
 
+# Las fallas se lanzan como excepción en vez de devolver un DataFrame vacío:
+# st.cache_resource no cachea excepciones, así que un error transitorio (p.ej.
+# Drive respondiendo HTML mientras se reemplaza el parquet) se reintenta en la
+# siguiente ejecución en vez de dejar la app sin maestro hasta reiniciarla.
 @st.cache_resource(show_spinner="Cargando maestro de adherentes…")
-@st.cache_resource(show_spinner="Cargando maestro de adherentes...")
-def load_maestro() -> pl.DataFrame:
+def _load_maestro_cached() -> pl.DataFrame:
     if MAESTRO_LOCAL_PATH.exists():
         df = pl.read_parquet(MAESTRO_LOCAL_PATH)
     elif MAESTRO_URL:
-        try:
-            sess = requests.Session()
-            resp = sess.get(MAESTRO_URL, timeout=60, allow_redirects=True)
-            if 'text/html' in resp.headers.get('Content-Type', ''):
-                return pl.DataFrame()
-            resp.raise_for_status()
-            df = pl.read_parquet(io.BytesIO(resp.content))
-        except Exception as e:
-            st.error(f"Error al descargar maestro: {e}")
-            return pl.DataFrame()
+        resp = requests.get(MAESTRO_URL, timeout=60, allow_redirects=True)
+        resp.raise_for_status()
+        if 'text/html' in resp.headers.get('Content-Type', ''):
+            raise RuntimeError("Drive devolvió una página HTML en vez del parquet "
+                               "(archivo no compartido públicamente o en actualización).")
+        df = pl.read_parquet(io.BytesIO(resp.content))
     else:
-        return pl.DataFrame()
+        raise RuntimeError("No hay MAESTRO_URL en los secrets ni parquet local.")
     cols = ['Rut Empresa', 'Razón Social', 'ID-CT', 'NUM SUC',
             'C.GLS_NOM_SUC', 'Dirección Suc', 'Comuna Sucursal',
             'Region Sucursal', 'Est Sucursal', 'Tipo suc']
     df = df.select([c for c in cols if c in df.columns])
-    return df.filter(pl.col('Est Sucursal') == 'Activa') if 'Est Sucursal' in df.columns else df
+    # A propósito NO se filtra por 'Est Sucursal'. El maestro de adherentes va
+    # atrasado respecto a la realidad -un CT puede reabrirse, o pasar de pasivo
+    # a activo, antes de que el maestro lo refleje- y filtrar dejaba fuera
+    # inscripciones legítimas. Se muestran todos los centros de trabajo.
+    if df.is_empty():
+        raise RuntimeError("El parquet del maestro llegó vacío.")
+    return df
+
+def load_maestro() -> pl.DataFrame:
+    try:
+        return _load_maestro_cached()
+    except Exception as e:
+        st.error(f"Error al cargar maestro de adherentes: {e}")
+        return pl.DataFrame()
 
 def _norm_rut(r: str) -> str:
     try: return rut_chile.format_rut_without_dots(str(r)).upper().strip()
@@ -73,12 +85,19 @@ def buscar_sucursales(rut_empresa: str = "", razon_social: str = "") -> pl.DataF
     return pl.DataFrame()
 
 @st.cache_data(show_spinner=False)
-def listar_empresas() -> list[str]:
-    df = load_maestro()
-    if df.is_empty(): return []
+def _listar_empresas_cached() -> list[str]:
+    # Se lanza en vez de devolver [] para que st.cache_data no cachee la lista
+    # vacía cuando el maestro falló (mismo motivo que _load_maestro_cached).
+    df = _load_maestro_cached()
     pdf = df.select(['Razón Social', 'Rut Empresa']).unique().to_pandas()
     pdf = pdf.dropna(subset=['Razón Social']).sort_values('Razón Social')
     return [f"{r['Razón Social']} — {r['Rut Empresa']}" for _, r in pdf.iterrows()]
+
+def listar_empresas() -> list[str]:
+    try:
+        return _listar_empresas_cached()
+    except Exception:
+        return []  # el error ya lo muestra load_maestro()
 
 # Listas para formulario
 ROLES = ["TRABAJADOR", "PROFESIONAL SST", "MIEMBRO DE COMITÉ PARITARIO", 
@@ -441,6 +460,11 @@ try:
     # Botón para limpiar cache (útil cuando hay actualizaciones)
     if st.sidebar.button("🔄 Actualizar Datos"):
         st.cache_data.clear()
+        # _load_maestro_cached() usa @st.cache_resource, que es un caché aparte: sin
+        # esta línea el maestro seguía siendo el cargado al arrancar la app.
+        # Se limpia solo esta función y no st.cache_resource completo, para no
+        # botar el singleton del buffer de asistencias y su hilo de sync.
+        _load_maestro_cached.clear()
         st.sidebar.success("✅ Cache limpiado. Datos actualizados.")
         st.rerun()
 
@@ -819,7 +843,7 @@ try:
 
             _maestro_check = load_maestro()
             if _maestro_check.is_empty():
-                st.error("❌ Maestro de adherentes no disponible. Configure `MAESTRO_URL` en los secrets.")
+                st.error("❌ Maestro de adherentes no disponible. Pruebe \"🔄 Actualizar Datos\" en la barra lateral.")
 
             sucursales_df = buscar_sucursales(rut_empresa_input, razon_social_input)
             sucursal_sel = None
