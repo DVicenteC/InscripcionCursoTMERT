@@ -26,6 +26,27 @@ SMTP_USER = st.secrets.get("SMTP_USER", "")
 SMTP_PASSWORD = st.secrets.get("SMTP_PASSWORD", "")
 MAESTRO_URL = st.secrets.get("MAESTRO_URL", None)
 
+def _api_json(response):
+    """Parsea la respuesta del Apps Script; si no es JSON, explica qué devolvió Google."""
+    try:
+        return response.json()
+    except ValueError:
+        body = response.text or ""
+        titulo = ""
+        if "<title>" in body.lower():
+            ini = body.lower().index("<title>") + 7
+            fin = body.lower().find("</title>", ini)
+            titulo = body[ini:fin].strip() if fin > ini else ""
+        if "accounts.google.com" in response.url or "ServiceLogin" in body:
+            causa = "Google pidió iniciar sesión: la implementación no tiene acceso 'Cualquier usuario'."
+        elif "no se encontró la función" in body.lower() or "script function not found" in body.lower():
+            causa = "El script no tiene doGet/doPost en la versión implementada."
+        else:
+            causa = "La API devolvió HTML en vez de JSON (revisar implementación y autorización del Apps Script)."
+        detalle = titulo or body[:200].replace("\n", " ")
+        raise ValueError(f"{causa} [HTTP {response.status_code}] {detalle}")
+
+
 def _rut_valido(rut_str):
     try:
         return bool(rut_chile.is_valid_rut(str(rut_str).strip()))
@@ -166,7 +187,7 @@ def enviar_confirmacion(destinatario, nombres, apellido_paterno, rut, curso_id, 
 def get_config_data():
     try:
         response = requests.get(f"{API_URL}?action=getConfig&key={API_KEY}")
-        data = response.json()
+        data = _api_json(response)
         
         if data['success']:
             df = pd.DataFrame(data['cursos'])
@@ -204,7 +225,7 @@ def get_config_data():
 def get_registros_data():
     try:
         response = requests.get(f"{API_URL}?action=getRegistros&key={API_KEY}")
-        data = response.json()
+        data = _api_json(response)
         
         if data['success']:
             return pd.DataFrame(data['registros'])
@@ -223,7 +244,7 @@ def activar_curso(curso_id):
             params={"action": "activarCurso", "key": API_KEY},
             json={"curso_id": curso_id}
         )
-        data = response.json()
+        data = _api_json(response)
         
         if data['success']:
             return True
@@ -242,7 +263,7 @@ def crear_curso(curso_data):
             params={"action": "addCurso", "key": API_KEY},
             json=curso_data
         )
-        data = response.json()
+        data = _api_json(response)
         
         if data['success']:
             return True
@@ -281,7 +302,7 @@ def guardar_registro(registro, max_retries=3):
                 json=registro,
                 timeout=15  # Timeout de 15 segundos
             )
-            data = response.json()
+            data = _api_json(response)
 
             if data['success']:
                 return True
@@ -334,7 +355,7 @@ def formato_fecha_dd_mm_yyyy(fecha):
 def get_curso_activo():
     try:
         response = requests.get(f"{API_URL}?action=getCursoActivo&key={API_KEY}")
-        data = response.json()
+        data = _api_json(response)
 
         if data['success']:
             return data['curso']
