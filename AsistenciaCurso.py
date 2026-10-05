@@ -40,12 +40,37 @@ API_KEY = st.secrets["API_KEY"]
 
 # ==================== FUNCIONES DE API ====================
 
+def _api_get(action, timeout=20, reintentos=3):
+    """GET a la API con reintentos. Lanza excepción si la respuesta no es JSON válido
+    (así st.cache_data NO cachea el fallo)."""
+    ultimo_error = None
+    for intento in range(reintentos):
+        try:
+            response = requests.get(f"{API_URL}?action={action}&key={API_KEY}", timeout=timeout)
+            response.raise_for_status()
+            try:
+                return response.json()
+            except ValueError:
+                snippet = response.text[:120].replace("\n", " ")
+                raise RuntimeError(f"La API no devolvió JSON (HTTP {response.status_code}): {snippet!r}")
+        except Exception as e:
+            ultimo_error = e
+            if intento < reintentos - 1:
+                time.sleep(1.5 * (intento + 1))
+    raise ultimo_error
+
 # Función para obtener datos de configuración de cursos
-@st.cache_data(ttl=300)  # Cache por 5 minutos
 def get_config_data():
     try:
-        response = requests.get(f"{API_URL}?action=getConfig&key={API_KEY}")
-        data = response.json()
+        return _get_config_data_cached()
+    except Exception as e:
+        st.error(f"Error al conectar con la API: {str(e)}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=300)  # Cache por 5 minutos (las excepciones no se cachean)
+def _get_config_data_cached():
+    if True:
+        data = _api_get("getConfig")
 
         if data['success']:
             df = pd.DataFrame(data['cursos'])
@@ -73,11 +98,7 @@ def get_config_data():
                     df['num_sesiones'] = df.apply(_count_sesiones, axis=1).astype(int)
             return df
         else:
-            st.error(f"Error al obtener configuración: {data.get('error', 'Error desconocido')}")
-            return pd.DataFrame()
-    except Exception as e:
-        st.error(f"Error al conectar con la API: {str(e)}")
-        return pd.DataFrame()
+            raise RuntimeError(f"Error al obtener configuración: {data.get('error', 'Error desconocido')}")
 
 # Función para obtener asistencias directamente desde Google Sheets (para descargas)
 @st.cache_data(ttl=60)
@@ -99,11 +120,17 @@ def get_asistencias_desde_sheets(curso_id=None, sesion=None):
         return pd.DataFrame()
 
 # Función para obtener registros de inscripción
-@st.cache_data(ttl=180)  # Cache por 3 minutos
 def get_registros_data():
     try:
-        response = requests.get(f"{API_URL}?action=getRegistros&key={API_KEY}")
-        data = response.json()
+        return _get_registros_data_cached()
+    except Exception as e:
+        st.error(f"Error al conectar con la API: {str(e)}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=180)  # Cache por 3 minutos (las excepciones no se cachean)
+def _get_registros_data_cached():
+    if True:
+        data = _api_get("getRegistros")
 
         if data['success']:
             df = pd.DataFrame(data['registros'])
@@ -113,11 +140,7 @@ def get_registros_data():
                 return pd.DataFrame()
             return df
         else:
-            st.error(f"Error al obtener registros: {data.get('error', 'Error desconocido')}")
-            return pd.DataFrame()
-    except Exception as e:
-        st.error(f"Error al conectar con la API: {str(e)}")
-        return pd.DataFrame()
+            raise RuntimeError(f"Error al obtener registros: {data.get('error', 'Error desconocido')}")
 
 # ==================== FUNCIONES DE BUFFER ====================
 
