@@ -296,6 +296,36 @@ _ROL_CODIGO_MK = {
     'DIRIGENTE SINDICAL': 5,
 }
 
+# Mismas palabras clave que usa DifusionesBot (bot.py: _REGION_KW) para pasar
+# el nombre de la región a su número 1-16 en la columna 'Region'.
+_REGION_KW = [
+    ("arica", 15), ("tarapac", 1), ("antofagasta", 2), ("atacama", 3),
+    ("coquimbo", 4), ("valpara", 5), ("higgins", 6), ("maule", 7),
+    ("nuble", 16), ("biob", 8), ("araucan", 9), ("los rios", 14),
+    ("los lagos", 10), ("ais", 11), ("magallanes", 12), ("metropol", 13),
+]
+
+def _region_a_numero(region):
+    """'Región de Valparaíso' → 5. Devuelve '' si no se reconoce."""
+    import unicodedata
+    s = str(region or '').strip().casefold()
+    s = ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
+    if not s or s in ('nan', 'none'):
+        return ''
+    for kw, num in _REGION_KW:
+        if kw in s:
+            return num
+    return ''
+
+def _rut_empresa_formato(rut):
+    """RUT empresa sin puntos y con guión (formato exigido por la plantilla del bot)."""
+    s = str(rut or '').strip().upper().replace('.', '').replace(' ', '')
+    if s in ('', 'NAN', 'NONE'):
+        return ''
+    if '-' not in s and len(s) > 1:
+        s = f"{s[:-1]}-{s[-1]}"
+    return s
+
 def generar_excel_ist(df):
     """
     Genera Excel formato MASTER CARGAS EMPRESAS IST EDUCA.
@@ -360,19 +390,30 @@ def generar_excel_ist(df):
     return buf
 
 
-def generar_excel_mk(df):
+def generar_excel_mk(df, fecha_sesion=None):
     """
-    Genera Excel formato Plantilla Carga Trabajadores MK Capacitaciones.
-    Incluye hoja Datos + hojas de referencia (MaeSexo, MaeNacionalidad, MaeRolTrabajador).
+    Genera Excel formato Plantilla Carga Trabajadores MK Capacitaciones, con las
+    mismas columnas que la plantilla de DifusionesBot (hoja 'Inscripciones'):
+    datos del trabajador + identificación de la empresa (Razón social, Rut empresa),
+    Comuna, Region (1-16) y Fecha 1 (fecha de la sesión). 'Direccion' va al final
+    como columna extra (el bot la ignora).
+    Incluye hojas de referencia (MaeSexo, MaeNacionalidad, MaeRolTrabajador).
     """
     wb = Workbook()
 
-    # Hoja Datos
+    # Hoja principal: el bot la busca por nombre ('Inscripciones')
     ws = wb.active
-    ws.title = "Datos"
+    ws.title = "Inscripciones"
 
     headers = ["Rut", "Nombres", "Apellido Paterno", "Apellido Materno",
-               "Sexo", "Nacionalidad", "Rol Trabajador", "Otro Rol", "Direccion"]
+               "Sexo", "Nacionalidad", "Rol Trabajador", "Otro Rol",
+               "Razón social", "Rut empresa (Sin puntos, con guión)",
+               "Comuna", "Region", "Fecha 1", "Direccion"]
+    col_fecha = headers.index("Fecha 1") + 1
+
+    fecha_valor = None
+    if fecha_sesion is not None and pd.notna(fecha_sesion):
+        fecha_valor = pd.Timestamp(fecha_sesion).to_pydatetime()
 
     header_fill = PatternFill("solid", fgColor="2E75B6")
     header_font = Font(name="Arial", bold=True, color="FFFFFF", size=10)
@@ -386,7 +427,7 @@ def generar_excel_mk(df):
         cell.alignment = Alignment(horizontal="center")
         cell.border = border
 
-    widths = [18, 25, 25, 25, 8, 14, 16, 25, 35]
+    widths = [18, 25, 25, 25, 8, 14, 16, 25, 35, 28, 22, 8, 12, 35]
     for col, w in enumerate(widths, 1):
         ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = w
 
@@ -403,12 +444,19 @@ def generar_excel_mk(df):
             str(getattr(row, 'nacionalidad', '')).capitalize(),
             rol_str.capitalize(),
             otro_rol,
+            str(getattr(row, 'razon_social', '') or '').strip(),
+            _rut_empresa_formato(getattr(row, 'rut_empresa', '')),
+            getattr(row, 'comuna', ''),
+            _region_a_numero(getattr(row, 'region', '')),
+            fecha_valor,
             getattr(row, 'direccion', ''),
         ]
         for col, val in enumerate(valores, 1):
             cell = ws.cell(row=row_idx, column=col, value=val)
             cell.font = data_font
             cell.border = border
+            if col == col_fecha:
+                cell.number_format = 'DD-MM-YYYY'
 
     # Hoja Parametros
     wp = wb.create_sheet("Parametros")
@@ -831,7 +879,10 @@ def main():
                                     st.markdown("**Formato MK Capacitaciones**")
                                     st.download_button(
                                         label="📥 Descargar MK Capacitaciones (.xlsx)",
-                                        data=generar_excel_mk(df_asistentes_rep),
+                                        data=generar_excel_mk(
+                                            df_asistentes_rep,
+                                            fecha_sesion=curso.get(f'fecha_sesion_{sesion_seleccionada}')
+                                        ),
                                         file_name=f"MK_{curso_seleccionado}_s{sesion_seleccionada}.xlsx",
                                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                                     )
