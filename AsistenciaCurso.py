@@ -29,6 +29,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 # Importar el sistema de buffer
 from db_buffer import get_buffer
+from registro_capacitacion import escribir_hoja_registro, modulo_de_sesion, NOMBRES_CURSO
 
 # Configuración básica
 st.set_page_config(page_title="Registro de Asistencia", layout="wide", initial_sidebar_state="collapsed")
@@ -390,13 +391,16 @@ def generar_excel_ist(df):
     return buf
 
 
-def generar_excel_mk(df, fecha_sesion=None):
+def generar_excel_mk(df, fecha_sesion=None, meta_registro=None):
     """
     Genera Excel formato Plantilla Carga Trabajadores MK Capacitaciones, con las
     mismas columnas que la plantilla de DifusionesBot (hoja 'Inscripciones'):
     datos del trabajador + identificación de la empresa (Razón social, Rut empresa),
     Comuna, Region (1-16) y Fecha 1 (fecha de la sesión). 'Direccion' va al final
     como columna extra (el bot la ignora).
+    Segunda hoja 'Registro': formulario imprimible IST "REGISTRO DE CAPACITACIÓN"
+    con los asistentes (meta_registro: curso, nombre_curso, fecha_txt, sede,
+    region_txt, virtual).
     Incluye hojas de referencia (MaeSexo, MaeNacionalidad, MaeRolTrabajador).
     """
     wb = Workbook()
@@ -432,6 +436,7 @@ def generar_excel_mk(df, fecha_sesion=None):
         ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = w
 
     data_font = Font(name="Arial", size=10)
+    filas_registro = []
     for row_idx, row in enumerate(df.itertuples(index=False), 2):
         rol_str = str(getattr(row, 'rol', '')).upper()
         otro_rol = rol_str if rol_str not in _ROL_CODIGO_MK else ''
@@ -451,12 +456,19 @@ def generar_excel_mk(df, fecha_sesion=None):
             fecha_valor,
             getattr(row, 'direccion', ''),
         ]
+        filas_registro.append(dict(zip(headers, valores)))
         for col, val in enumerate(valores, 1):
             cell = ws.cell(row=row_idx, column=col, value=val)
             cell.font = data_font
             cell.border = border
             if col == col_fecha:
                 cell.number_format = 'DD-MM-YYYY'
+
+    # Hoja imprimible con los asistentes (formulario IST COD 9016/074)
+    meta = dict(meta_registro or {})
+    if fecha_valor is not None and not meta.get('fecha_txt'):
+        meta['fecha_txt'] = fecha_valor.strftime('%d-%m-%Y')
+    escribir_hoja_registro(wb.create_sheet("Registro"), filas_registro, meta)
 
     # Hoja Parametros
     wp = wb.create_sheet("Parametros")
@@ -877,11 +889,24 @@ def main():
                                 )
                             with col_r2:
                                     st.markdown("**Formato MK Capacitaciones**")
+                                    st.caption("Incluye hoja «Registro» imprimible con los asistentes.")
+                                    _modulo = modulo_de_sesion(sesion_seleccionada, max_ses)
+                                    _mod_460 = str(curso.get('modalidad_460', '') or '').strip().lower()
+                                    _region_curso = str(curso.get('region', '') or '').strip()
                                     st.download_button(
                                         label="📥 Descargar MK Capacitaciones (.xlsx)",
                                         data=generar_excel_mk(
                                             df_asistentes_rep,
-                                            fecha_sesion=curso.get(f'fecha_sesion_{sesion_seleccionada}')
+                                            fecha_sesion=curso.get(f'fecha_sesion_{sesion_seleccionada}'),
+                                            meta_registro={
+                                                'curso': _modulo or str(curso_seleccionado),
+                                                'nombre_curso': NOMBRES_CURSO.get(_modulo, ''),
+                                                'region_txt': '' if _region_curso.lower() in ('nan', 'none') else _region_curso,
+                                                'sede': '',
+                                                # La sesión 1 (460) es la jornada nacional a distancia
+                                                # salvo que el curso sea 100% presencial.
+                                                'virtual': _modulo == '460' and not _mod_460.startswith('pres'),
+                                            },
                                         ),
                                         file_name=f"MK_{curso_seleccionado}_s{sesion_seleccionada}.xlsx",
                                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
